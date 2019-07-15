@@ -1,6 +1,6 @@
-# godao
+# Godao
 
-DAO Generator for Go
+DAO (Data Access Object) Generator for Go
 
 ## Requirements
 
