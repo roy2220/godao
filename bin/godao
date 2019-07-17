@@ -43,7 +43,13 @@ CRE_IN_ANNOTATION = re.compile(r"""
     \{{
     in
     \:
-    ({id})
+    (
+        {id}
+        (?:
+            \.
+            {id}
+        )?
+    )
     \}}
 )
 """.format(id=RE_ID).replace("\n", "").replace(" ", ""))
@@ -59,67 +65,104 @@ CRE_OUT_ANNOTATION = re.compile(r"""
 )
 """.format(id=RE_ID).replace("\n", "").replace(" ", ""))
 
-KIND_BOOL = 1
-KIND_BOOL_ARRAY = -1
-KIND_INT = 2
-KIND_INT_ARRAY = -2
-KIND_INT8 = 2
-KIND_INT8_ARRAY = -2
-KIND_UINT8 = 3
-KIND_UINT8_ARRAY = -3
-KIND_INT16 = 4
-KIND_INT16_ARRAY = -4
-KIND_UINT16 = 5
-KIND_UINT16_ARRAY = -5
-KIND_INT32 = 6
-KIND_INT32_ARRAY = -6
-KIND_UINT32 = 7
-KIND_UINT32_ARRAY = -7
-KIND_INT64 = 8
-KIND_INT64_ARRAY = -8
-KIND_UINT64 = 9
-KIND_UINT64_ARRAY = -9
-KIND_FLOAT32 = 10
-KIND_FLOAT32_ARRAY = -10
-KIND_FLOAT64 = 11
-KIND_FLOAT64_ARRAY = -11
-KIND_BYTES = 12
-KIND_BYTES_ARRAY = -12
-KIND_STRING = 13
-KIND_STRING_ARRAY = -13
-KIND_TIME = 14
-KIND_TIME_ARRAY = -14
+KIND_FLAG_NULLABLE = 1
+KIND_FLAG_ARRAY = 2
+
+KIND_BOOL          = 1 << 2
+KIND_NULL_BOOL     = KIND_BOOL | KIND_FLAG_NULLABLE
+KIND_BOOL_ARRAY    = KIND_BOOL | KIND_FLAG_ARRAY
+KIND_INT           = 2 << 2
+KIND_NULL_INT      = KIND_INT | KIND_FLAG_NULLABLE
+KIND_INT_ARRAY     = KIND_INT | KIND_FLAG_ARRAY
+KIND_UINT          = 3 << 2
+KIND_NULL_UINT     = KIND_UINT | KIND_FLAG_NULLABLE
+KIND_UINT_ARRAY    = KIND_UINT | KIND_FLAG_ARRAY
+KIND_INT8          = 3 << 2
+KIND_NULL_INT8     = KIND_INT8 | KIND_FLAG_NULLABLE
+KIND_INT8_ARRAY    = KIND_INT8 | KIND_FLAG_ARRAY
+KIND_UINT8         = 4 << 2
+KIND_NULL_UINT8    = KIND_UINT8 | KIND_FLAG_NULLABLE
+KIND_UINT8_ARRAY   = KIND_UINT8 | KIND_FLAG_ARRAY
+KIND_INT16         = 5 << 2
+KIND_NULL_INT16    = KIND_INT16 | KIND_FLAG_NULLABLE
+KIND_INT16_ARRAY   = KIND_INT16 | KIND_FLAG_ARRAY
+KIND_UINT16        = 6 << 2
+KIND_NULL_UINT16   = KIND_UINT16 | KIND_FLAG_NULLABLE
+KIND_UINT16_ARRAY  = KIND_UINT16 | KIND_FLAG_ARRAY
+KIND_INT32         = 7 << 2
+KIND_NULL_INT32    = KIND_INT32 | KIND_FLAG_NULLABLE
+KIND_INT32_ARRAY   = KIND_INT32 | KIND_FLAG_ARRAY
+KIND_UINT32        = 8 << 2
+KIND_NULL_UINT32   = KIND_UINT32 | KIND_FLAG_NULLABLE
+KIND_UINT32_ARRAY  = KIND_UINT32 | KIND_FLAG_ARRAY
+KIND_INT64         = 9 << 2
+KIND_NULL_INT64    = KIND_INT64 | KIND_FLAG_NULLABLE
+KIND_INT64_ARRAY   = KIND_INT64 | KIND_FLAG_ARRAY
+KIND_UINT64        = 10 << 2
+KIND_NULL_UINT64   = KIND_UINT64 | KIND_FLAG_NULLABLE
+KIND_UINT64_ARRAY  = KIND_UINT64 | KIND_FLAG_ARRAY
+KIND_FLOAT32       = 11 << 2
+KIND_NULL_FLOAT32  = KIND_FLOAT32 | KIND_FLAG_NULLABLE
+KIND_FLOAT32_ARRAY = KIND_FLOAT32 | KIND_FLAG_ARRAY
+KIND_FLOAT64       = 12 << 2
+KIND_NULL_FLOAT64  = KIND_FLOAT64 | KIND_FLAG_NULLABLE
+KIND_FLOAT64_ARRAY = KIND_FLOAT64 | KIND_FLAG_ARRAY
+KIND_BYTES         = 13 << 2
+KIND_STRING        = 14 << 2
+KIND_BYTES_ARRAY   = KIND_BYTES | KIND_FLAG_ARRAY
+KIND_NULL_STRING   = KIND_STRING | KIND_FLAG_NULLABLE
+KIND_STRING_ARRAY  = KIND_STRING | KIND_FLAG_ARRAY
+KIND_TIME          = 15 << 2
+KIND_NULL_TIME     = KIND_TIME | KIND_FLAG_NULLABLE
+KIND_TIME_ARRAY    = KIND_TIME | KIND_FLAG_ARRAY
 
 TYPES_AND_KINDS = (
     ("bool", KIND_BOOL),
+    ("bool*", KIND_NULL_BOOL),
     ("bool[]", KIND_BOOL_ARRAY),
     ("int", KIND_INT),
+    ("int*", KIND_NULL_INT),
     ("int[]", KIND_INT_ARRAY),
+    ("uint", KIND_UINT),
+    ("uint*", KIND_NULL_UINT),
+    ("uint[]", KIND_UINT_ARRAY),
     ("int8", KIND_INT8),
+    ("int8*", KIND_NULL_INT8),
     ("int8[]", KIND_INT8_ARRAY),
     ("uint8", KIND_UINT8),
+    ("uint8*", KIND_NULL_UINT8),
     ("uint8[]", KIND_UINT8_ARRAY),
     ("int16", KIND_INT16),
+    ("int16*", KIND_NULL_INT16),
     ("int16[]", KIND_INT16_ARRAY),
     ("uint16", KIND_UINT16),
+    ("uint16*", KIND_NULL_UINT16),
     ("uint16[]", KIND_UINT16_ARRAY),
     ("int32", KIND_INT32),
+    ("int32*", KIND_NULL_INT32),
     ("int32[]", KIND_INT32_ARRAY),
     ("uint32", KIND_UINT32),
+    ("uint32*", KIND_NULL_UINT32),
     ("uint32[]", KIND_UINT32_ARRAY),
     ("int64", KIND_INT64),
+    ("int64*", KIND_NULL_INT64),
     ("int64[]", KIND_INT64_ARRAY),
     ("uint64", KIND_UINT64),
+    ("uint64*", KIND_NULL_UINT64),
     ("uint64[]", KIND_UINT64_ARRAY),
     ("float32", KIND_FLOAT32),
+    ("float32*", KIND_NULL_FLOAT32),
     ("float32[]", KIND_FLOAT32_ARRAY),
     ("float64", KIND_FLOAT64),
+    ("float64*", KIND_NULL_FLOAT64),
     ("float64[]", KIND_FLOAT64_ARRAY),
     ("bytes", KIND_BYTES),
     ("bytes[]", KIND_BYTES_ARRAY),
     ("string", KIND_STRING),
+    ("string*", KIND_NULL_STRING),
     ("string[]", KIND_STRING_ARRAY),
     ("time", KIND_TIME),
+    ("time*", KIND_NULL_TIME),
     ("time[]", KIND_TIME_ARRAY),
 )
 
@@ -128,34 +171,51 @@ KIND_2_TYPE = {kind: type_ for type_, kind in TYPES_AND_KINDS}
 
 KIND_2_GO_TYPE = {
     KIND_BOOL: "bool",
+    KIND_NULL_BOOL: "sql.NullBool",
     KIND_BOOL_ARRAY: "[]bool",
     KIND_INT: "int",
+    KIND_NULL_INT: "sql.NullInt64",
     KIND_INT_ARRAY: "[]int",
+    KIND_UINT: "uint",
+    KIND_NULL_UINT: "sql.NullInt64",
+    KIND_UINT_ARRAY: "[]uint",
     KIND_INT8: "int8",
+    KIND_NULL_INT8: "sql.NullInt64",
     KIND_INT8_ARRAY: "[]int8",
     KIND_UINT8: "uint8",
+    KIND_NULL_UINT8: "sql.NullInt64",
     KIND_UINT8_ARRAY: "[]uint8",
     KIND_INT16: "int16",
+    KIND_NULL_INT16: "sql.NullInt64",
     KIND_INT16_ARRAY: "[]int16",
     KIND_UINT16: "uint16",
+    KIND_NULL_UINT16: "sql.NullInt64",
     KIND_UINT16_ARRAY: "[]uint16",
     KIND_INT32: "int32",
+    KIND_NULL_INT32: "sql.NullInt64",
     KIND_INT32_ARRAY: "[]int32",
     KIND_UINT32: "uint32",
+    KIND_NULL_UINT32: "sql.NullInt64",
     KIND_UINT32_ARRAY: "[]uint32",
     KIND_INT64: "int64",
+    KIND_NULL_INT64: "sql.NullInt64",
     KIND_INT64_ARRAY: "[]int64",
     KIND_UINT64: "uint64",
+    KIND_NULL_UINT64: "sql.NullInt64",
     KIND_UINT64_ARRAY: "[]uint64",
     KIND_FLOAT32: "float32",
+    KIND_NULL_FLOAT32: "sql.NullFloat64",
     KIND_FLOAT32_ARRAY: "[]float32",
     KIND_FLOAT64: "float64",
+    KIND_NULL_FLOAT64: "sql.NullFloat64",
     KIND_FLOAT64_ARRAY: "[]float64",
     KIND_BYTES: "[]byte",
     KIND_BYTES_ARRAY: "[][]byte",
     KIND_STRING: "string",
+    KIND_NULL_STRING: "sql.NullString",
     KIND_STRING_ARRAY: "[]string",
     KIND_TIME: "time.Time",
+    KIND_NULL_TIME: "mysql.NullTime",
     KIND_TIME_ARRAY: "[]time.Time",
 }
 
@@ -184,13 +244,13 @@ class Config(object):
         for dao in self.daos.values():
             dao.resolve(context)
 
-    def emit_code(self):
-        code = """\
+    def emit_code(self, context):
+        code = Template("""\
 /*
  * Generated by Godao. DO NOT EDIT!
  */
 
-package {package_name}
+package ${root.package_name}
 
 import (
     "context"
@@ -198,19 +258,34 @@ import (
     "fmt"
     "time"
 
+    "github.com/go-sql-driver/mysql"
     "github.com/jmoiron/sqlx"
 )
 
 var (
     _ = fmt.Sprintf
     _ time.Time
+    _ mysql.NullTime
 )
-""".format(
-            package_name=self.package_name,
+""").render(
+            root=self,
         )
 
         for dao in self.daos.values():
-            code += dao.emit_code()
+            code += dao.emit_code(context)
+
+        code += Template("""\
+% for struct_type_name, struct_type_def in context_.struct_type_defs.items():
+
+type ${struct_type_name} struct {
+%     for field_name, field_kind in struct_type_def.items():
+    ${field_name} ${context_.kind_to_go_type(field_kind)}
+%     endfor
+}
+% endfor
+""").render(
+            context_=context,
+        )
 
         return code
 
@@ -252,7 +327,7 @@ class DAOConfig(object):
         for method in self.methods.values():
             method.resolve(context)
 
-    def emit_code(self):
+    def emit_code(self, context):
         code = Template("""\
 % if any(string.value is not None for string in dao.strings.values()):
 
@@ -307,7 +382,7 @@ func Make${dao.name}(db *sqlx.DB) ${dao.name} {
         )
 
         for method in self.methods.values():
-            code += method.emit_code()
+            code += method.emit_code(context)
 
         return code
 
@@ -367,89 +442,75 @@ class MethodConfig(object):
         self.output.resolve(context)
         self.sql.resolve(context)
 
-    def emit_code(self):
+    def emit_code(self, context):
         if len(self.output.results) == 0:
             result_zero = "sql.Result{}"
         else:
-            if self.output.struct_type_name is None and self.output.select_one:
+            if self.output.select_one and not kind_is_struct(self.output.reduced_result_kind):
                 result_zero = {
                     KIND_BOOL: "false",
                     KIND_BYTES: "nil",
                     KIND_STRING: "\"\"",
                     KIND_TIME: "time.Time{}",
-                }.get(self.output.result[1], "0")
+                }.get(self.output.reduced_result_kind, "0")
             else:
                 result_zero = "nil"
 
         code = Template("""\
-% if method.output.struct_type_name is not None and not method.output.struct_type_is_reused:
+<%
+    if method.output.reduced_result_kind is None:
+        reduced_result_go_type = None
+    else:
+        reduced_result_go_type = context_.kind_to_go_type(method.output.reduced_result_kind)
+%>\\
 
-type ${method.output.struct_type_name} struct {
-%     for result_name, result_kind in method.output.results.items():
-    ${result_name} ${KIND_2_GO_TYPE[result_kind]}
-%     endfor
-}
-% endif
-
-func (self ${method.parent.name}) ${method.name}(context_ context.Context\\
+func (_self ${dao.name}) ${method.name}(context_ context.Context\\
 % for param_name, param_kind in method.input.params.items():
-, ${param_name} ${KIND_2_GO_TYPE[param_kind]}\\
+, ${param_name} ${context_.kind_to_go_type(param_kind)}\\
 % endfor
 ) (\\
-% if len(method.output.results) == 0:
+% if reduced_result_go_type is None:
 sql.Result\\
 % else:
-%     if method.output.struct_type_name is None:
-${("" if method.output.select_one else "[]") + KIND_2_GO_TYPE[method.output.result[1]]}\\
-%     else:
-${("" if method.output.select_one else "[]") + "*" + method.output.struct_type_name}\\
-%     endif
+${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
 , error) {
-    return self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}(self.db, context_\\
+    return _self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}(_self.db, context_\\
 % for param_name in method.input.params.keys():
 , ${param_name}\\
 % endfor
 )
 }
 
-func (self ${method.parent.name}) ${"tx" + camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else "Tx" + method.name}(\\
-tx ${method.parent.name}Tx, context_ context.Context\\
+func (_self ${dao.name}) ${"tx" + camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else "Tx" + method.name}(\\
+tx ${dao.name}Tx, context_ context.Context\\
 % for param_name, param_kind in method.input.params.items():
-, ${param_name} ${KIND_2_GO_TYPE[param_kind]}\\
+, ${param_name} ${context_.kind_to_go_type(param_kind)}\\
 % endfor
 ) (\\
-% if len(method.output.results) == 0:
+% if reduced_result_go_type is None:
 sql.Result\\
 % else:
-%     if method.output.struct_type_name is None:
-${("" if method.output.select_one else "[]") + KIND_2_GO_TYPE[method.output.result[1]]}\\
-%     else:
-${("" if method.output.select_one else "[]") + "*" + method.output.struct_type_name}\\
-%     endif
+${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
 , error) {
-    return self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}((*sqlx.Tx)(tx), context_\\
+    return _self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}((*sqlx.Tx)(tx), context_\\
 % for i, param_name in enumerate(method.input.params.keys()):
 , ${param_name}\\
 % endfor
 )
 }
 
-func (${method.parent.name}) do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}(\\
-${"execer sqlx.ExecerContext" if len(method.output.results) == 0 else "queryer sqlx.QueryerContext"}, context_ context.Context\\
+func (${dao.name}) do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}(\\
+${"execer sqlx.ExecerContext" if reduced_result_go_type is None else "queryer sqlx.QueryerContext"}, context_ context.Context\\
 % for param_name, param_kind in method.input.params.items():
-, ${param_name} ${KIND_2_GO_TYPE[param_kind]}\\
+, ${param_name} ${context_.kind_to_go_type(param_kind)}\\
 % endfor
 ) (\\
-% if len(method.output.results) == 0:
+% if reduced_result_go_type is None:
 sql.Result\\
 % else:
-%     if method.output.struct_type_name is None:
-${("" if method.output.select_one else "[]") + KIND_2_GO_TYPE[method.output.result[1]]}\\
-%     else:
-${("" if method.output.select_one else "[]") + "*" + method.output.struct_type_name}\\
-%     endif
+${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
 , error) {
     /*
@@ -457,17 +518,17 @@ ${("" if method.output.select_one else "[]") + "*" + method.output.struct_type_n
      * ${line}
 % endfor
      */
-    query := "${method.sql.text}"
+    _query := "${method.sql.text}"
 % if len(method.sql.str_annotations) >= 1:
-    query = fmt.Sprintf(query\\
+    _query = fmt.Sprintf(_query\\
 %     for string_name, param_names in method.sql.str_annotations:
-<%        string = method.parent.strings[string_name] %>\\
+<%        string = dao.strings[string_name] %>\\
 %         if param_names is None:
-, ${make_string_constant_name(method.parent.name, string_name)}\\
+, ${make_string_constant_name(dao.name, string_name)}\\
 %         else:
 , ${string.maker_func_name}(context_\\
 %             if string.value is not None:
-, ${make_string_constant_name(method.parent.name, string_name)}\\
+, ${make_string_constant_name(dao.name, string_name)}\\
 %             endif
 %             for param_name in param_names:
 , ${param_name}\\
@@ -477,107 +538,92 @@ ${("" if method.output.select_one else "[]") + "*" + method.output.struct_type_n
 %     endfor
 )
 % endif
-    args := []interface{}{${", ".join(method.sql.in_annotations)}}
+    _args := []interface{}{${", ".join(method.sql.in_annotations)}}
 % if method.sql.has_array_query_args:
-    query, args, e := sqlx.In(query, args...)
+    _query, _args, _e := sqlx.In(_query, _args...)
 
-    if e != nil {
-        return ${result_zero}, e
+    if _e != nil {
+        return ${result_zero}, _e
     }
 
 % endif
-% if len(method.output.results) == 0:
-    return execer.ExecContext(context_, query, args...)
+% if reduced_result_go_type is None:
+    return execer.ExecContext(context_, _query, _args...)
 % else:
 %     if method.output.select_one:
-    row := queryer.QueryRowxContext(context_, query, args...)
-%         if method.output.struct_type_name is None:
-    var record ${KIND_2_GO_TYPE[method.output.result[1]]}
+    _row := queryer.QueryRowxContext(context_, _query, _args...)
+%         if kind_is_struct(method.output.reduced_result_kind):
+    _record := new(${reduced_result_go_type[1:]})
 
-    if e := row.Scan(&record); e != nil {
+    if _e := _row.Scan(${", ".join("&_record." + result_name for _, result_name in method.sql.out_annotations)}); _e != nil {
 %             if method.output.ignore_no_rows:
-        if e == sql.ErrNoRows {
-            e = nil
+        if _e == sql.ErrNoRows {
+            _e = nil
         }
 
 %             endif
-        return ${result_zero}, e
+        return ${result_zero}, _e
     }
-
-    return record, nil
 %         else:
-    var record ${method.output.struct_type_name}
+    var _record ${reduced_result_go_type}
 
-    if e := row.Scan(${", ".join("&record." + result_name for _, result_name in method.sql.out_annotations)}); e != nil {
+    if _e := _row.Scan(&_record); _e != nil {
 %             if method.output.ignore_no_rows:
-        if e == sql.ErrNoRows {
-            e = nil
+        if _e == sql.ErrNoRows {
+            _e = nil
         }
 
 %             endif
-        return ${result_zero}, e
+        return ${result_zero}, _e
     }
-
-    return &record, nil
 %         endif
+
+    return _record, nil
 %     else:
-    rows, e := queryer.QueryxContext(context_, query, args...)
+    _rows, _e := queryer.QueryxContext(context_, _query, _args...)
 
-    if e != nil {
-        return ${result_zero}, e
+    if _e != nil {
+        return ${result_zero}, _e
     }
 
-%         if method.output.struct_type_name is None:
-    records := []${KIND_2_GO_TYPE[method.output.result[1]]}(nil)
+    _records := []${reduced_result_go_type}(nil)
 
-    for rows.Next() {
-        var record ${KIND_2_GO_TYPE[method.output.result[1]]}
+    for _rows.Next() {
+%         if kind_is_struct(method.output.reduced_result_kind):
+        _record := new(${reduced_result_go_type[1:]})
 
-        if e := rows.Scan(&record); e != nil {
-            rows.Close()
-            return ${result_zero}, e
+        if _e := _rows.Scan(${", ".join("&_record." + result_name for _, result_name in method.sql.out_annotations)}); _e != nil {
+            _rows.Close()
+            return ${result_zero}, _e
         }
-
-        records = append(records, record)
-    }
 %         else:
-    records := []*${method.output.struct_type_name}(nil)
+        var _record ${reduced_result_go_type}
 
-    for rows.Next() {
-        var record ${method.output.struct_type_name}
-
-        if e := rows.Scan(${", ".join("&record." + result_name for _, result_name in method.sql.out_annotations)}); e != nil {
-            rows.Close()
-            return ${result_zero}, e
+        if _e := _rows.Scan(&_record); _e != nil {
+            _rows.Close()
+            return ${result_zero}, _e
         }
-
-        records = append(records, &record)
-    }
 %         endif
 
-    rows.Close()
-    return records, nil
+        _records = append(_records, _record)
+    }
+
+    _rows.Close()
+    return _records, nil
 %     endif
 % endif
 }
 """).render(
-            KIND_2_GO_TYPE=KIND_2_GO_TYPE,
             method=self,
+            dao=self.parent,
+            context_=context,
             result_zero=result_zero,
+            kind_is_struct=kind_is_struct,
             is_camel_case=is_camel_case,
             camel_case_to_pascal_case=camel_case_to_pascal_case,
             pascal_case_to_camel_case=pascal_case_to_camel_case,
             make_string_constant_name=make_string_constant_name,
         )
-
-
-        if len(self.output.results) == 0:
-            pass
-        else:
-            if self.output.struct_type_name is None:
-                pass
-            else:
-                pass
 
         return code
 
@@ -593,7 +639,11 @@ class InputConfig(object):
             for k, v in raw.items():
                 if isinstance(k, str) and k.startswith("$"):
                     param_name = check_name(path + [k], k[1:])
-                    instance.params[param_name] = parse_type(path + [k], v)
+
+                    if isinstance(v, OrderedDict):
+                        instance.params[param_name] = parse_struct_type_config(path + [k], v)
+                    else:
+                        instance.params[param_name] = parse_type(path + [k], v)
 
         return instance
 
@@ -602,7 +652,20 @@ class InputConfig(object):
         self.path = path
         self.params = OrderedDict()
 
+        self.expanded_params = OrderedDict()
+
     def resolve(self, context):
+        for param_name, maybe_param_kind in tuple(self.params.items()):
+            if isinstance(maybe_param_kind, int):
+                self.expanded_params[param_name] = maybe_param_kind
+            else:
+                struct_type_name, struct_type_def = maybe_param_kind
+                param_kind = context.define_struct_type(self.path, struct_type_name, struct_type_def)
+                self.params[param_name] = param_kind
+
+                for field_name, field_kind in struct_type_def.items():
+                    self.expanded_params[param_name + "." + field_name] = field_kind
+
         method = self.parent
         used_param_names = set()
 
@@ -613,7 +676,7 @@ class InputConfig(object):
         for param_name in method.sql.in_annotations:
             used_param_names.add(param_name)
 
-        for param_name in set(self.params.keys()) - used_param_names:
+        for param_name in set(self.expanded_params.keys()) - used_param_names:
             raise InvalidConfigError(self.path, "param {!r} unused".format(param_name))
 
 
@@ -646,8 +709,7 @@ class OutputConfig(object):
         self.select_one = None
         self.ignore_no_rows = None
 
-        self.result = None
-        self.struct_type_is_reused = None
+        self.reduced_result_kind = None
 
     def resolve(self, context):
         method = self.parent
@@ -669,26 +731,11 @@ class OutputConfig(object):
         if len(self.results) >= 2 and self.struct_type_name is None:
             raise InvalidConfigError(self.path, "missing struct type name")
 
-        if len(self.results) == 1:
-            self.result, = self.results.items()
-
-        if self.struct_type_name is not None:
-            struct_digest = "struct { "
-
-            for result_name, result_kind in self.results.items():
-                result_type = KIND_2_TYPE[result_kind]
-                struct_digest += "{} {}; ".format(result_type, result_name)
-
-            struct_digest += "}"
-            struct_digest2 = context.struct_digests.get(self.struct_type_name)
-            self.struct_type_is_reused = struct_digest2 is not None
-
-            if self.struct_type_is_reused:
-                if struct_digest != struct_digest2:
-                    raise InvalidConfigError(self.path, "struct type {!r} redefined: {!r} != {!r}"
-                                                        .format(self.struct_type_name, struct_digest, struct_digest2))
+        if len(self.results) >= 1:
+            if self.struct_type_name is None:
+                (_, self.reduced_result_kind), = self.results.items()
             else:
-                context.struct_digests[self.struct_type_name] = struct_digest
+                self.reduced_result_kind = context.define_struct_type(self.path, self.struct_type_name, self.results)
 
 
 class SQLConfig(object):
@@ -729,21 +776,26 @@ class SQLConfig(object):
             text = text[:m.start(2)] + text[m.end(2):]
 
         for c in ("{", "}"):
-            i = text.find(c)
+            i = 0
 
-            if i < 0:
-                continue
+            while True:
+                i = text.find(c, i)
 
-            j = i + 1
-
-            while j < len(text):
-                if text[j] != c:
+                if i < 0:
                     break
 
-                j += 1
+                j = i + 1
 
-            if (j - i) % 2 == 1:
-                raise InvalidConfigError(path, "bad annotations: value={!r}".format(text))
+                while j < len(text):
+                    if text[j] != c:
+                        break
+
+                    j += 1
+
+                i += (j - i) // 2 * 2
+
+                if i != j:
+                    raise InvalidConfigError(path, "bad annotations: value=...{!r}".format(text[i:]))
 
         text = text.replace("{{", "{").replace("}}", "}")
         text = re.sub(r"\s+", " ", text.strip())
@@ -763,9 +815,10 @@ class SQLConfig(object):
 
     def resolve(self, context):
         method = self.parent
+        dao = method.parent
 
         for string_name, param_names in self.str_annotations:
-            string = method.parent.strings.get(string_name)
+            string = dao.strings.get(string_name)
 
             if string is None:
                 raise InvalidConfigError(self.path, "string {!r} undefined".format(string_name))
@@ -778,11 +831,11 @@ class SQLConfig(object):
                     raise InvalidConfigError(self.path, "str:{} => can not call with argument list ({})".format(string_name, ",".join(param_names)))
 
                 for param_name in param_names:
-                    if param_name not in method.input.params:
+                    if param_name not in method.input.expanded_params:
                         raise InvalidConfigError(self.path, "param {!r} undefined".format(param_name))
 
         for param_name in self.in_annotations:
-            if param_name not in method.input.params:
+            if param_name not in method.input.expanded_params:
                 raise InvalidConfigError(self.path, "param {!r} undefined".format(param_name))
 
         used_result_names = set()
@@ -797,7 +850,7 @@ class SQLConfig(object):
             used_result_names.add(result_name)
 
         for param_name in self.in_annotations:
-            param_kind = method.input.params[param_name]
+            param_kind = method.input.expanded_params[param_name]
 
             if kind_is_array(param_kind):
                 self.has_array_query_args = True
@@ -806,9 +859,42 @@ class SQLConfig(object):
             self.has_array_query_args = False
 
 
-class ResolutionContext(object):
+class Context(object):
     def __init__(self):
-        self.struct_digests = {}
+        self.struct_type_defs = OrderedDict()
+        self._struct_kinds_and_type_digests = {}
+        self._struct_kind_2_go_type = {}
+
+    def define_struct_type(self, path, struct_type_name, struct_type_def):
+        struct_type_digest = "struct { "
+
+        for field_name, field_kind in struct_type_def.items():
+            field_type = KIND_2_TYPE[field_kind]
+            struct_type_digest += "{} {}; ".format(field_type, field_name)
+
+        struct_type_digest += "}"
+        struct_kind_and_type_digest = self._struct_kinds_and_type_digests.get(struct_type_name)
+
+        if struct_kind_and_type_digest is None:
+            self.struct_type_defs[struct_type_name] = struct_type_def
+            struct_kind = -len(self.struct_type_defs)
+            self._struct_kinds_and_type_digests[struct_type_name] = struct_kind, struct_type_digest
+            self._struct_kind_2_go_type[struct_kind] = "*" + struct_type_name
+            return struct_kind
+        else:
+            struct_kind, struct_type_digest2 = struct_kind_and_type_digest
+
+            if struct_type_digest != struct_type_digest2:
+                raise InvalidConfigError(path, "struct type {!r} redefined: {!r} != {!r}"
+                                               .format(struct_type_name, struct_type_digest, struct_type_digest2))
+
+            return struct_kind
+
+    def kind_to_go_type(self, kind):
+        if kind_is_struct(kind):
+            return self._struct_kind_2_go_type[kind]
+        else:
+            return KIND_2_GO_TYPE[kind]
 
 
 class InvalidConfigError(Exception):
@@ -872,7 +958,23 @@ def parse_type(path, type_):
     return kind
 
 
+def parse_struct_type_config(path, struct_type_config):
+    struct_type_name = check_name(path + ["struct_type_name"], struct_type_config.get("struct_type_name"))
+    struct_type_def = OrderedDict()
+
+    for k, v in struct_type_config.items():
+        if isinstance(k, str) and k.startswith("$"):
+            field_name = check_name(path + [k], k[1:])
+            struct_type_def[field_name] = parse_type(path + [k], v)
+
+    return struct_type_name, struct_type_def
+
+
 def kind_is_array(kind):
+    return kind >= 1 and (kind & KIND_FLAG_ARRAY) != 0
+
+
+def kind_is_struct(kind):
     return kind < 0
 
 
@@ -910,9 +1012,10 @@ def make_string_constant_name(dao_name, string_name):
 
 def generate_code(config_text):
     config = load_config(config_text)
-    resolution_context = ResolutionContext()
-    config.resolve(resolution_context)
-    code = format_code(config.emit_code())
+    context = Context()
+    config.resolve(context)
+    code = config.emit_code(context)
+    code = format_code(code)
     return code
 
 
