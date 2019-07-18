@@ -1104,8 +1104,8 @@ class Preprocessor(object):
 
             self._skip_line()
 
-        statement.lines = json.dumps("\n".join(lines))
-        statement.lines_size = lines_size + len(lines) - 1
+        statement.lines = json.dumps("\n".join(lines) + "\n")
+        statement.lines_size = lines_size + len(lines)
         return statement
 
     def _read_line(self):

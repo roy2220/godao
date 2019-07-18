@@ -194,7 +194,7 @@ pip install -U git+https://github.com/let-z-go/godao
         _query_substrs := _buffer2[:0]
         _buffer3 := [3]interface{}{}
         _args := _buffer3[:0]
-        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n  (?, ?, ?)"...)
+        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n  (?, ?, ?)\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid, nickname, gender)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
@@ -226,7 +226,7 @@ pip install -U git+https://github.com/let-z-go/godao
         _record := &_buffer4
         _buffer5 := [3]interface{}{}
         _results := _buffer5[:0]
-        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` = ?"...)
+        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
         _results = append(_results, &_record.UID, &_record.Nickname, &_record.Gender)
@@ -266,7 +266,7 @@ pip install -U git+https://github.com/let-z-go/godao
         _record := &_buffer4
         _buffer5 := [3]interface{}{}
         _results := _buffer5[:0]
-        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` IN (?)"...)
+        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` IN (?)\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uids)
         _expand_args = true
@@ -321,7 +321,7 @@ pip install -U git+https://github.com/let-z-go/godao
         var _record string
         _buffer5 := [1]interface{}{}
         _results := _buffer5[:0]
-        _raw_query = append(_raw_query, "SELECT\n  `nickname`\nFROM\n  `%s`\nWHERE\n  `uid` = ?"...)
+        _raw_query = append(_raw_query, "SELECT\n  `nickname`\nFROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
         _results = append(_results, &_record)
@@ -358,17 +358,17 @@ pip install -U git+https://github.com/let-z-go/godao
         _query_substrs := _buffer2[:0]
         _buffer3 := [3]interface{}{}
         _args := _buffer3[:0]
-        _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET"...)
+        _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         if args.Nickname != "" {
-                _raw_query = append(_raw_query, "  `nickname` = ?,"...)
+                _raw_query = append(_raw_query, "  `nickname` = ?,\n"...)
                 _args = append(_args, args.Nickname)
         }
         if args.Gender != 0 {
-                _raw_query = append(_raw_query, "  `gender` = ?,"...)
+                _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                 _args = append(_args, args.Gender)
         }
-        _raw_query = append(_raw_query, "WHERE\n  `uid` = ?"...)
+        _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
