@@ -90,15 +90,19 @@ pip install -U git+https://github.com/let-z-go/godao
          $appID: string
          $uid: int64
          $args:
-           $Nickname: string*
-           $Gender: int8*
+           $Nickname: string
+           $Gender: int8
            struct_type_name: UpdateUserInfoArgs
        sql: |
          UPDATE
            `%s{str:TableUserInfo(appID)}`
          SET
-           `nickname` = IFNULL(?{in:args.Nickname}, `nickname`),
-           `gender` = IFNULL(?{in:args.Gender}, `gender`)
+         #if args.Nickname != ""
+           `nickname` = ?{in:args.Nickname},
+         #endif
+         #if args.Gender != 0
+           `gender` = ?{in:args.Gender},
+         #endif
          WHERE
            `uid` = ?{in:uid}
    ```
@@ -119,227 +123,265 @@ pip install -U git+https://github.com/let-z-go/godao
    package main
 
    import (
-       "context"
-       "database/sql"
-       "fmt"
-       "time"
+        "context"
+        "database/sql"
+        "fmt"
+        "time"
 
-       "github.com/go-sql-driver/mysql"
-       "github.com/jmoiron/sqlx"
+        "github.com/go-sql-driver/mysql"
+        "github.com/jmoiron/sqlx"
    )
 
    var (
-       _ = fmt.Sprintf
-       _ time.Time
-       _ mysql.NullTime
+        _ = fmt.Sprintf
+        _ time.Time
+        _ mysql.NullTime
    )
 
    type UserDAO struct {
-       db *sqlx.DB
+        db *sqlx.DB
    }
 
    func (self UserDAO) Tx(context_ context.Context, txOptions *sql.TxOptions, callback func(UserDAOTx) error) error {
-       tx, e := self.db.BeginTxx(context_, txOptions)
+        tx, e := self.db.BeginTxx(context_, txOptions)
 
-       if e != nil {
-           return e
-       }
+        if e != nil {
+                return e
+        }
 
-       txIsCommitted := false
+        txIsCommitted := false
 
-       defer func() {
-           if !txIsCommitted {
-               tx.Rollback()
-           }
-       }()
+        defer func() {
+                if !txIsCommitted {
+                        tx.Rollback()
+                }
+        }()
 
-       if e := callback(UserDAOTx(tx)); e != nil {
-           return e
-       }
+        if e := callback(UserDAOTx(tx)); e != nil {
+                return e
+        }
 
-       if e := tx.Commit(); e != nil {
-           return e
-       }
+        if e := tx.Commit(); e != nil {
+                return e
+        }
 
-       txIsCommitted = true
-       return nil
+        txIsCommitted = true
+        return nil
    }
 
    type UserDAOTx *sqlx.Tx
 
    func MakeUserDAO(db *sqlx.DB) UserDAO {
-       return UserDAO{db}
+        return UserDAO{db}
    }
 
    func (_self UserDAO) InsertUserInfo(context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
-       return _self.doInsertUserInfo(_self.db, context_, appID, uid, nickname, gender)
+        return _self.doInsertUserInfo(_self.db, context_, appID, uid, nickname, gender)
    }
 
    func (_self UserDAO) TxInsertUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
-       return _self.doInsertUserInfo((*sqlx.Tx)(tx), context_, appID, uid, nickname, gender)
+        return _self.doInsertUserInfo((*sqlx.Tx)(tx), context_, appID, uid, nickname, gender)
    }
 
    func (UserDAO) doInsertUserInfo(execer sqlx.ExecerContext, context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
-       /*
-        * INSERT INTO
-        *   `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
-        * VALUES
-        *   (?{in:uid}, ?{in:nickname}, ?{in:gender})
-        */
-       _query := "INSERT INTO `%s` (`uid`, `nickname`, `gender`) VALUES (?, ?, ?)"
-       _query = fmt.Sprintf(_query, LocateUserInfoTable(context_, appID))
-       _args := []interface{}{uid, nickname, gender}
-       return execer.ExecContext(context_, _query, _args...)
+        // INSERT INTO
+        //   `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+        // VALUES
+        //   (?{in:uid}, ?{in:nickname}, ?{in:gender})
+        _buffer1 := [68]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [3]interface{}{}
+        _args := _buffer3[:0]
+        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n  (?, ?, ?)"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        _args = append(_args, uid, nickname, gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        return execer.ExecContext(context_, _query, _args...)
    }
 
    func (_self UserDAO) SelectUserInfo(context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-       return _self.doSelectUserInfo(_self.db, context_, appID, uid)
+        return _self.doSelectUserInfo(_self.db, context_, appID, uid)
    }
 
    func (_self UserDAO) TxSelectUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-       return _self.doSelectUserInfo((*sqlx.Tx)(tx), context_, appID, uid)
+        return _self.doSelectUserInfo((*sqlx.Tx)(tx), context_, appID, uid)
    }
 
    func (UserDAO) doSelectUserInfo(queryer sqlx.QueryerContext, context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-       /*
-        * SELECT
-        *   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
-        * FROM
-        *   `%s{str:TableUserInfo(appID)}`
-        * WHERE
-        *   `uid` = ?{in:uid}
-        */
-       _query := "SELECT `uid`, `nickname`, `gender` FROM `%s` WHERE `uid` = ?"
-       _query = fmt.Sprintf(_query, LocateUserInfoTable(context_, appID))
-       _args := []interface{}{uid}
-       _row := queryer.QueryRowxContext(context_, _query, _args...)
-       _record := new(UserInfo)
-
-       if _e := _row.Scan(&_record.UID, &_record.Nickname, &_record.Gender); _e != nil {
-           if _e == sql.ErrNoRows {
-               _e = nil
-           }
-
-           return nil, _e
-       }
-
-       return _record, nil
+        // SELECT
+        //   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
+        // FROM
+        //   `%s{str:TableUserInfo(appID)}`
+        // WHERE
+        //   `uid` = ?{in:uid}
+        _buffer1 := [67]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [1]interface{}{}
+        _args := _buffer3[:0]
+        var _buffer4 UserInfo
+        _record := &_buffer4
+        _buffer5 := [3]interface{}{}
+        _results := _buffer5[:0]
+        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` = ?"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        _args = append(_args, uid)
+        _results = append(_results, &_record.UID, &_record.Nickname, &_record.Gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        if _e := queryer.QueryRowxContext(context_, _query, _args...).Scan(_results...); _e != nil {
+                if _e == sql.ErrNoRows {
+                        _e = nil
+                }
+                return nil, _e
+        }
+        return _record, nil
    }
 
    func (_self UserDAO) SelectMultiUserInfos(context_ context.Context, appID string, uids []int64) ([]*UserInfo, error) {
-       return _self.doSelectMultiUserInfos(_self.db, context_, appID, uids)
+        return _self.doSelectMultiUserInfos(_self.db, context_, appID, uids)
    }
 
    func (_self UserDAO) TxSelectMultiUserInfos(tx UserDAOTx, context_ context.Context, appID string, uids []int64) ([]*UserInfo, error) {
-       return _self.doSelectMultiUserInfos((*sqlx.Tx)(tx), context_, appID, uids)
+        return _self.doSelectMultiUserInfos((*sqlx.Tx)(tx), context_, appID, uids)
    }
 
    func (UserDAO) doSelectMultiUserInfos(queryer sqlx.QueryerContext, context_ context.Context, appID string, uids []int64) ([]*UserInfo, error) {
-       /*
-        * SELECT
-        *   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
-        * FROM
-        *   `%s{str:TableUserInfo(appID)}`
-        * WHERE
-        *   `uid` IN (?{in:uids})
-        */
-       _query := "SELECT `uid`, `nickname`, `gender` FROM `%s` WHERE `uid` IN (?)"
-       _query = fmt.Sprintf(_query, LocateUserInfoTable(context_, appID))
-       _args := []interface{}{uids}
-       _query, _args, _e := sqlx.In(_query, _args...)
-
-       if _e != nil {
-           return nil, _e
-       }
-
-       _rows, _e := queryer.QueryxContext(context_, _query, _args...)
-
-       if _e != nil {
-           return nil, _e
-       }
-
-       _records := []*UserInfo(nil)
-
-       for _rows.Next() {
-           _record := new(UserInfo)
-
-           if _e := _rows.Scan(&_record.UID, &_record.Nickname, &_record.Gender); _e != nil {
-               _rows.Close()
-               return nil, _e
-           }
-
-           _records = append(_records, _record)
-       }
-
-       _rows.Close()
-       return _records, nil
+        // SELECT
+        //   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
+        // FROM
+        //   `%s{str:TableUserInfo(appID)}`
+        // WHERE
+        //   `uid` IN (?{in:uids})
+        _buffer1 := [70]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [1]interface{}{}
+        _args := _buffer3[:0]
+        _expand_args := false
+        var _buffer4 UserInfo
+        _record := &_buffer4
+        _buffer5 := [3]interface{}{}
+        _results := _buffer5[:0]
+        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` IN (?)"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        _args = append(_args, uids)
+        _expand_args = true
+        _results = append(_results, &_record.UID, &_record.Nickname, &_record.Gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        if _expand_args {
+                var _e error
+                _query, _args, _e = sqlx.In(_query, _args...)
+                if _e != nil {
+                        return nil, _e
+                }
+        }
+        _rows, _e := queryer.QueryxContext(context_, _query, _args...)
+        if _e != nil {
+                return nil, _e
+        }
+        _records := []*UserInfo(nil)
+        for _rows.Next() {
+                if _e := _rows.Scan(_results...); _e != nil {
+                        _rows.Close()
+                        return nil, _e
+                }
+                _record_copy := new(UserInfo)
+                *_record_copy = *_record
+                _records = append(_records, _record_copy)
+        }
+        _rows.Close()
+        return _records, nil
    }
 
    func (_self UserDAO) SelectNicknameOfUserInfo(context_ context.Context, appID string, uid int64) (string, error) {
-       return _self.doSelectNicknameOfUserInfo(_self.db, context_, appID, uid)
+        return _self.doSelectNicknameOfUserInfo(_self.db, context_, appID, uid)
    }
 
    func (_self UserDAO) TxSelectNicknameOfUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64) (string, error) {
-       return _self.doSelectNicknameOfUserInfo((*sqlx.Tx)(tx), context_, appID, uid)
+        return _self.doSelectNicknameOfUserInfo((*sqlx.Tx)(tx), context_, appID, uid)
    }
 
    func (UserDAO) doSelectNicknameOfUserInfo(queryer sqlx.QueryerContext, context_ context.Context, appID string, uid int64) (string, error) {
-       /*
-        * SELECT
-        *   `nickname{out:nickname}`
-        * FROM
-        *   `%s{str:TableUserInfo(appID)}`
-        * WHERE
-        *   `uid` = ?{in:uid}
-        */
-       _query := "SELECT `nickname` FROM `%s` WHERE `uid` = ?"
-       _query = fmt.Sprintf(_query, LocateUserInfoTable(context_, appID))
-       _args := []interface{}{uid}
-       _row := queryer.QueryRowxContext(context_, _query, _args...)
-       var _record string
-
-       if _e := _row.Scan(&_record); _e != nil {
-           return "", _e
-       }
-
-       return _record, nil
+        // SELECT
+        //   `nickname{out:nickname}`
+        // FROM
+        //   `%s{str:TableUserInfo(appID)}`
+        // WHERE
+        //   `uid` = ?{in:uid}
+        _buffer1 := [50]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [1]interface{}{}
+        _args := _buffer3[:0]
+        var _record string
+        _buffer5 := [1]interface{}{}
+        _results := _buffer5[:0]
+        _raw_query = append(_raw_query, "SELECT\n  `nickname`\nFROM\n  `%s`\nWHERE\n  `uid` = ?"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        _args = append(_args, uid)
+        _results = append(_results, &_record)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        if _e := queryer.QueryRowxContext(context_, _query, _args...).Scan(_results...); _e != nil {
+                return "", _e
+        }
+        return _record, nil
    }
 
    func (_self UserDAO) UpdateUserInfo(context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-       return _self.doUpdateUserInfo(_self.db, context_, appID, uid, args)
+        return _self.doUpdateUserInfo(_self.db, context_, appID, uid, args)
    }
 
    func (_self UserDAO) TxUpdateUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-       return _self.doUpdateUserInfo((*sqlx.Tx)(tx), context_, appID, uid, args)
+        return _self.doUpdateUserInfo((*sqlx.Tx)(tx), context_, appID, uid, args)
    }
 
    func (UserDAO) doUpdateUserInfo(execer sqlx.ExecerContext, context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-       /*
-        * UPDATE
-        *   `%s{str:TableUserInfo(appID)}`
-        * SET
-        *   `nickname` = IFNULL(?{in:args.Nickname}, `nickname`),
-        *   `gender` = IFNULL(?{in:args.Gender}, `gender`)
-        * WHERE
-        *   `uid` = ?{in:uid}
-        */
-       _query := "UPDATE `%s` SET `nickname` = IFNULL(?, `nickname`), `gender` = IFNULL(?, `gender`) WHERE `uid` = ?"
-       _query = fmt.Sprintf(_query, LocateUserInfoTable(context_, appID))
-       _args := []interface{}{args.Nickname, args.Gender, uid}
-       return execer.ExecContext(context_, _query, _args...)
+        // UPDATE
+        //   `%s{str:TableUserInfo(appID)}`
+        // SET
+        // #if args.Nickname != ""
+        //   `nickname` = ?{in:args.Nickname},
+        // #endif
+        // #if args.Gender != 0
+        //   `gender` = ?{in:args.Gender},
+        // #endif
+        // WHERE
+        //   `uid` = ?{in:uid}
+        _buffer1 := [70]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [3]interface{}{}
+        _args := _buffer3[:0]
+        _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        if args.Nickname != "" {
+                _raw_query = append(_raw_query, "  `nickname` = ?,"...)
+                _args = append(_args, args.Nickname)
+        }
+        if args.Gender != 0 {
+                _raw_query = append(_raw_query, "  `gender` = ?,"...)
+                _args = append(_args, args.Gender)
+        }
+        _raw_query = append(_raw_query, "WHERE\n  `uid` = ?"...)
+        _args = append(_args, uid)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        return execer.ExecContext(context_, _query, _args...)
    }
 
    type UserInfo struct {
-       UID      int64
-       Nickname string
-       Gender   int8
+        UID      int64
+        Nickname string
+        Gender   int8
    }
 
    type UpdateUserInfoArgs struct {
-       Nickname sql.NullString
-       Gender   sql.NullInt64
+        Nickname string
+        Gender   int8
    }
-
    ```
-
-

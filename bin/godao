@@ -2,6 +2,7 @@
 
 
 from collections import OrderedDict
+import json
 import os
 import re
 import subprocess
@@ -15,7 +16,7 @@ import yamlordereddictloader
 RE_ID = r"[_a-zA-Z][_a-zA-Z0-9]*"
 CRE_NAME = re.compile(r"^{}$".format(RE_ID))
 
-CRE_STR_ANNOTATION = re.compile(r"""
+CRE_STR_ANNOT = re.compile(r"""
 %s
 (
     \{{
@@ -37,7 +38,7 @@ CRE_STR_ANNOTATION = re.compile(r"""
 )
 """.format(id=RE_ID).replace("\n", "").replace(" ", ""))
 
-CRE_IN_ANNOTATION = re.compile(r"""
+CRE_IN_ANNOT = re.compile(r"""
 \?
 (
     \{{
@@ -54,7 +55,7 @@ CRE_IN_ANNOTATION = re.compile(r"""
 )
 """.format(id=RE_ID).replace("\n", "").replace(" ", ""))
 
-CRE_OUT_ANNOTATION = re.compile(r"""
+CRE_OUT_ANNOT = re.compile(r"""
 ({id})
 (
     \{{
@@ -443,8 +444,67 @@ class MethodConfig(object):
         self.sql.resolve(context)
 
     def emit_code(self, context):
+        class Counter(Visitor):
+            def __init__(self):
+                super(Counter, self).__init__()
+                self.max_number_of_str_annots = 0
+                self.max_number_of_in_annots = 0
+                self.max_number_of_out_annots = 0
+                self.max_query_size = 0
+                self._str_annot_count = 0
+                self._in_annot_count = 0
+                self._out_annot_count = 0
+                self._query_size = 0
+
+            def visit_if_statement(self, statement):
+                backup = self._out_annot_count, self._in_annot_count, self._out_annot_count, self._query_size
+
+                for _, then_body in statement.conds_and_then_bodies:
+                    then_body.accept_visit(self)
+                    self._out_annot_count, self._in_annot_count, self._out_annot_count, self._query_size = backup
+
+                if statement.else_body is not None:
+                    statement.else_body.accept_visit(self)
+
+                self._str_annot_count, self._in_annot_count, self._out_annot_count, self._query_size = \
+                    self.max_number_of_str_annots, \
+                    self.max_number_of_in_annots, \
+                    self.max_number_of_out_annots, \
+                    self.max_query_size
+                return False
+
+            def visit_text_statement(self, statement):
+                self._str_annot_count += len(statement.str_annots)
+                self._in_annot_count += len(statement.in_annots)
+                self._out_annot_count += len(statement.out_annots)
+                self._query_size += statement.lines_size
+
+                if self._str_annot_count > self.max_number_of_str_annots:
+                    self.max_number_of_str_annots = self._str_annot_count
+
+                if self._in_annot_count > self.max_number_of_in_annots:
+                    self.max_number_of_in_annots = self._in_annot_count
+
+                if self._out_annot_count > self.max_number_of_out_annots:
+                    self.max_number_of_out_annots = self._out_annot_count
+
+                if self._query_size > self.max_query_size:
+                    self.max_query_size = self._query_size
+
+                return True
+
+        counter = Counter()
+        self.sql.program.accept_visit(counter)
+        method = self
+        dao = method.parent
+
+        if self.output.reduced_result_kind is None:
+            reduced_result_go_type = None
+        else:
+            reduced_result_go_type = context.kind_to_go_type(self.output.reduced_result_kind)
+
         if len(self.output.results) == 0:
-            result_zero = "sql.Result{}"
+            result_zero = "sql.Result(nil)"
         else:
             if self.output.select_one and not kind_is_struct(self.output.reduced_result_kind):
                 result_zero = {
@@ -456,13 +516,177 @@ class MethodConfig(object):
             else:
                 result_zero = "nil"
 
+        class CodeGenerator(Visitor):
+            def __init__(self, line_prefix, indent):
+                self._line_prefix = line_prefix
+                self._indent = indent
+                self._lines = []
+
+            def get_output(self):
+                return "\n".join(self._lines)
+
+            def visit_program(self, program):
+                self._output_line("_buffer1 := [{}]byte{{}}".format(counter.max_query_size))
+                self._output_line("_raw_query := _buffer1[:0]")
+
+                if counter.max_number_of_str_annots >= 1:
+                    self._output_line("_buffer2 := [{}]interface{{}}{{}}".format(counter.max_number_of_str_annots))
+                    self._output_line("_query_substrs := _buffer2[:0]")
+
+                if counter.max_number_of_in_annots >= 1:
+                    self._output_line("_buffer3 := [{}]interface{{}}{{}}".format(counter.max_number_of_in_annots))
+                    self._output_line("_args := _buffer3[:0]")
+
+                    if method.sql.has_array_query_args:
+                        self._output_line("_expand_args := false")
+
+                if counter.max_number_of_out_annots >= 1:
+                    if kind_is_struct(method.output.reduced_result_kind):
+                        self._output_line("var _buffer4 {}".format(reduced_result_go_type[1:]))
+                        self._output_line("_record := &_buffer4")
+                    else:
+                        self._output_line("var _record {}".format(reduced_result_go_type))
+
+                    self._output_line("_buffer5 := [{}]interface{{}}{{}}".format(counter.max_number_of_out_annots))
+                    self._output_line("_results := _buffer5[:0]")
+
+                for statement in program.body:
+                    statement.accept_visit(self)
+
+                if counter.max_number_of_str_annots == 0:
+                    self._output_line("_query := string(_raw_query)")
+                else:
+                    self._output_line("_query := fmt.Sprintf(string(_raw_query), _query_substrs...)")
+
+                    if method.sql.has_array_query_args:
+                        self._output_line("if _expand_args {")
+                        self._output_line("{}var _e error".format(self._indent))
+                        self._output_line("{}_query, _args, _e = sqlx.In(_query, _args...)".format(self._indent))
+                        self._output_line("{}if _e != nil {{".format(self._indent))
+                        self._output_line("{}{}return {}, _e".format(self._indent, self._indent, result_zero))
+                        self._output_line("{}}}".format(self._indent))
+                        self._output_line("}")
+
+                if counter.max_number_of_in_annots == 0:
+                    args_part = ""
+                else:
+                    args_part = ", _args..."
+
+                if reduced_result_go_type is None:
+                    self._output_line("return execer.ExecContext(context_, _query{})".format(args_part))
+                else:
+                    if method.output.select_one:
+                        self._output_line("if _e := queryer.QueryRowxContext(context_, _query{}).Scan(_results...); _e != nil {{".format(args_part))
+
+                        if method.output.ignore_no_rows:
+                            self._output_line("{}if _e == sql.ErrNoRows {{".format(self._indent))
+                            self._output_line("{}{}_e = nil".format(self._indent, self._indent))
+                            self._output_line("{}}}".format(self._indent))
+
+                        self._output_line("{}return {}, _e".format(self._indent, result_zero))
+                        self._output_line("}")
+                        self._output_line("return _record, nil")
+                    else:
+                        self._output_line("_rows, _e := queryer.QueryxContext(context_, _query{})".format(args_part))
+                        self._output_line("if _e != nil {")
+                        self._output_line("{}return {}, _e".format(self._indent, result_zero))
+                        self._output_line("}")
+                        self._output_line("_records := []{}(nil)".format(reduced_result_go_type))
+                        self._output_line("for _rows.Next() {")
+                        self._output_line("{}if _e := _rows.Scan(_results...); _e != nil {{".format(self._indent))
+                        self._output_line("{}{}_rows.Close()".format(self._indent, self._indent))
+                        self._output_line("{}{}return {}, _e".format(self._indent, self._indent, result_zero))
+                        self._output_line("{}}}".format(self._indent))
+
+                        if kind_is_struct(method.output.reduced_result_kind):
+                            self._output_line("{}_record_copy := new({})".format(self._indent, reduced_result_go_type[1:]))
+                            self._output_line("{}*_record_copy = *_record".format(self._indent))
+                            self._output_line("{}_records = append(_records, _record_copy)".format(self._indent))
+                        else:
+                            self._output_line("{}_records = append(_records, _record)".format(self._indent))
+
+                        self._output_line("}")
+                        self._output_line("_rows.Close()")
+                        self._output_line("return _records, nil")
+
+                return False
+
+            def visit_if_statement(self, statement):
+                cond, then_body = statement.conds_and_then_bodies[0]
+                self._output_line("if {} {{".format(cond))
+                then_body.accept_visit(self)
+
+                for cond, then_body in statement.conds_and_then_bodies[1:]:
+                    self._output_line("}} else if {} {{".format(cond))
+                    then_body.accept_visit(self)
+
+                if statement.else_body is not None:
+                    self._output_line("} else {")
+                    statement.else_body.accept_visit(self)
+
+                self._output_line("}")
+                return False
+
+            def visit_block_statement(self, statement):
+                self._line_prefix += self._indent
+
+                for statement2 in statement.body:
+                    statement2.accept_visit(self)
+
+                self._line_prefix = self._line_prefix[:-len(self._indent)]
+                return False
+
+            def visit_text_statement(self, statement):
+                self._output_line("_raw_query = append(_raw_query, {}...)".format(statement.lines))
+
+                if len(statement.str_annots) >= 1:
+                    query_substrs = []
+
+                    for string_name, param_names in statement.str_annots:
+                        if param_names is None:
+                            query_substr = make_string_constant_name(dao.name, string_name)
+                        else:
+                            string = dao.strings[string_name]
+                            query_substr = string.maker_func_name + "(context_"
+
+                            if string.value is not None:
+                                query_substr += ", " + make_string_constant_name(dao.name, string_name)
+
+                            for param_name in param_names:
+                                query_substr += ", " + param_name
+
+                            query_substr += ")"
+
+                        query_substrs.append(query_substr)
+
+                    self._output_line("_query_substrs = append(_query_substrs, {})".format(", ".join(query_substrs)))
+
+                if len(statement.in_annots) >= 1:
+                    self._output_line("_args = append(_args, {})".format(", ".join(statement.in_annots)))
+
+                    for param_name in statement.in_annots:
+                        param_kind = method.input.expanded_params[param_name]
+
+                        if kind_is_array(param_kind):
+                            self._output_line("_expand_args = true")
+                            break
+
+                if len(statement.out_annots) >= 1:
+                    if kind_is_struct(method.output.reduced_result_kind):
+                        results = ("&_record." + result_name for _, result_name in method.sql.out_annots)
+                        self._output_line("_results = append(_results, {})".format(", ".join(results)))
+                    else:
+                        self._output_line("_results = append(_results, &_record)")
+
+                return False
+
+            def _output_line(self, line):
+                self._lines.append(self._line_prefix + line)
+
+        code_generator = CodeGenerator("    ", "    ")
+        self.sql.program.accept_visit(code_generator)
+
         code = Template("""\
-<%
-    if method.output.reduced_result_kind is None:
-        reduced_result_go_type = None
-    else:
-        reduced_result_go_type = context_.kind_to_go_type(method.output.reduced_result_kind)
-%>\\
 
 func (_self ${dao.name}) ${method.name}(context_ context.Context\\
 % for param_name, param_kind in method.input.params.items():
@@ -513,116 +737,19 @@ sql.Result\\
 ${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
 , error) {
-    /*
-% for line in method.sql.raw.strip().split("\\n"):
-     * ${line}
+% for line in method.sql.raw.split("\\n"):
+     // ${line}
 % endfor
-     */
-    _query := "${method.sql.text}"
-% if len(method.sql.str_annotations) >= 1:
-    _query = fmt.Sprintf(_query\\
-%     for string_name, param_names in method.sql.str_annotations:
-<%        string = dao.strings[string_name] %>\\
-%         if param_names is None:
-, ${make_string_constant_name(dao.name, string_name)}\\
-%         else:
-, ${string.maker_func_name}(context_\\
-%             if string.value is not None:
-, ${make_string_constant_name(dao.name, string_name)}\\
-%             endif
-%             for param_name in param_names:
-, ${param_name}\\
-%             endfor
-)\\
-%         endif
-%     endfor
-)
-% endif
-    _args := []interface{}{${", ".join(method.sql.in_annotations)}}
-% if method.sql.has_array_query_args:
-    _query, _args, _e := sqlx.In(_query, _args...)
-
-    if _e != nil {
-        return ${result_zero}, _e
-    }
-
-% endif
-% if reduced_result_go_type is None:
-    return execer.ExecContext(context_, _query, _args...)
-% else:
-%     if method.output.select_one:
-    _row := queryer.QueryRowxContext(context_, _query, _args...)
-%         if kind_is_struct(method.output.reduced_result_kind):
-    _record := new(${reduced_result_go_type[1:]})
-
-    if _e := _row.Scan(${", ".join("&_record." + result_name for _, result_name in method.sql.out_annotations)}); _e != nil {
-%             if method.output.ignore_no_rows:
-        if _e == sql.ErrNoRows {
-            _e = nil
-        }
-
-%             endif
-        return ${result_zero}, _e
-    }
-%         else:
-    var _record ${reduced_result_go_type}
-
-    if _e := _row.Scan(&_record); _e != nil {
-%             if method.output.ignore_no_rows:
-        if _e == sql.ErrNoRows {
-            _e = nil
-        }
-
-%             endif
-        return ${result_zero}, _e
-    }
-%         endif
-
-    return _record, nil
-%     else:
-    _rows, _e := queryer.QueryxContext(context_, _query, _args...)
-
-    if _e != nil {
-        return ${result_zero}, _e
-    }
-
-    _records := []${reduced_result_go_type}(nil)
-
-    for _rows.Next() {
-%         if kind_is_struct(method.output.reduced_result_kind):
-        _record := new(${reduced_result_go_type[1:]})
-
-        if _e := _rows.Scan(${", ".join("&_record." + result_name for _, result_name in method.sql.out_annotations)}); _e != nil {
-            _rows.Close()
-            return ${result_zero}, _e
-        }
-%         else:
-        var _record ${reduced_result_go_type}
-
-        if _e := _rows.Scan(&_record); _e != nil {
-            _rows.Close()
-            return ${result_zero}, _e
-        }
-%         endif
-
-        _records = append(_records, _record)
-    }
-
-    _rows.Close()
-    return _records, nil
-%     endif
-% endif
+${impl_code}
 }
 """).render(
             method=self,
             dao=self.parent,
             context_=context,
-            result_zero=result_zero,
-            kind_is_struct=kind_is_struct,
+            reduced_result_go_type=reduced_result_go_type,
             is_camel_case=is_camel_case,
             camel_case_to_pascal_case=camel_case_to_pascal_case,
-            pascal_case_to_camel_case=pascal_case_to_camel_case,
-            make_string_constant_name=make_string_constant_name,
+            impl_code=code_generator.get_output(),
         )
 
         return code
@@ -669,11 +796,11 @@ class InputConfig(object):
         method = self.parent
         used_param_names = set()
 
-        for _, param_names in method.sql.str_annotations:
+        for _, param_names in method.sql.str_annots:
             if param_names is not None:
                 used_param_names.update(param_names)
 
-        for param_name in method.sql.in_annotations:
+        for param_name in method.sql.in_annots:
             used_param_names.add(param_name)
 
         for param_name in set(self.expanded_params.keys()) - used_param_names:
@@ -715,7 +842,7 @@ class OutputConfig(object):
         method = self.parent
         used_result_names = set()
 
-        for _, result_name in method.sql.out_annotations:
+        for _, result_name in method.sql.out_annots:
             used_result_names.add(result_name)
 
         for result_name in set(self.results.keys()) - used_result_names:
@@ -741,75 +868,31 @@ class OutputConfig(object):
 class SQLConfig(object):
     @classmethod
     def load(cls, parent, path, raw):
-        text = must_be_str(path, raw)
+        raw = must_be_str(path, raw).rstrip()
         instance = cls(parent, path, raw)
+        instance.program = Preprocessor(path, raw).get_program()
 
-        while True:
-            m = CRE_STR_ANNOTATION.search(text)
+        class AnnotCollector(Visitor):
+            def __init__(self):
+                super(AnnotCollector, self).__init__()
 
-            if m is None:
-                break
+            def visit_text_statement(self, statement):
+                instance.str_annots.extend(statement.str_annots)
+                instance.in_annots.extend(statement.in_annots)
+                instance.out_annots.extend(statement.out_annots)
+                return True
 
-            if m.group(3) is None:
-                instance.str_annotations.append((m.group(2), None))
-            else:
-                instance.str_annotations.append((m.group(2), m.group(3)[1:-1].split(",")))
-
-            text = text[:m.start(1)] + text[m.end(1):]
-
-        while True:
-            m = CRE_IN_ANNOTATION.search(text)
-
-            if m is None:
-                break
-
-            instance.in_annotations.append(m.group(2))
-            text = text[:m.start(1)] + text[m.end(1):]
-
-        while True:
-            m = CRE_OUT_ANNOTATION.search(text)
-
-            if m is None:
-                break
-
-            instance.out_annotations.append((m.group(1), m.group(3)))
-            text = text[:m.start(2)] + text[m.end(2):]
-
-        for c in ("{", "}"):
-            i = 0
-
-            while True:
-                i = text.find(c, i)
-
-                if i < 0:
-                    break
-
-                j = i + 1
-
-                while j < len(text):
-                    if text[j] != c:
-                        break
-
-                    j += 1
-
-                i += (j - i) // 2 * 2
-
-                if i != j:
-                    raise InvalidConfigError(path, "bad annotations: value=...{!r}".format(text[i:]))
-
-        text = text.replace("{{", "{").replace("}}", "}")
-        text = re.sub(r"\s+", " ", text.strip())
-        instance.text = text
+        instance.program.accept_visit(AnnotCollector())
         return instance
 
     def __init__(self, parent, path, raw):
         self.parent = parent
         self.path = path
         self.raw = raw
-        self.str_annotations = []
-        self.in_annotations = []
-        self.out_annotations = []
-        self.text = None
+        self.program = None
+        self.str_annots = []
+        self.in_annots = []
+        self.out_annots = []
 
         self.has_array_query_args = None
 
@@ -817,7 +900,7 @@ class SQLConfig(object):
         method = self.parent
         dao = method.parent
 
-        for string_name, param_names in self.str_annotations:
+        for string_name, param_names in self.str_annots:
             string = dao.strings.get(string_name)
 
             if string is None:
@@ -834,13 +917,13 @@ class SQLConfig(object):
                     if param_name not in method.input.expanded_params:
                         raise InvalidConfigError(self.path, "param {!r} undefined".format(param_name))
 
-        for param_name in self.in_annotations:
+        for param_name in self.in_annots:
             if param_name not in method.input.expanded_params:
                 raise InvalidConfigError(self.path, "param {!r} undefined".format(param_name))
 
         used_result_names = set()
 
-        for _, result_name in self.out_annotations:
+        for _, result_name in self.out_annots:
             if result_name not in method.output.results:
                 raise InvalidConfigError(self.path, "result {!r} undefined".format(result_name))
 
@@ -849,7 +932,7 @@ class SQLConfig(object):
 
             used_result_names.add(result_name)
 
-        for param_name in self.in_annotations:
+        for param_name in self.in_annots:
             param_kind = method.input.expanded_params[param_name]
 
             if kind_is_array(param_kind):
@@ -857,6 +940,253 @@ class SQLConfig(object):
                 break
         else:
             self.has_array_query_args = False
+
+
+class Preprocessor(object):
+    def __init__(self, path, source):
+        self._path = path
+        self._lines = source.split("\n")
+        self._next_line_index = 0
+
+    def get_program(self):
+        program = Program()
+
+        while True:
+            _, ok = self._peek_line()
+
+            if not ok:
+                return program
+
+            program.body.append(self._get_statement())
+
+    def _get_statement(self):
+        line, _ = self._peek_line()
+
+        if line.startswith("#"):
+            match = re.match(r"#\s*if", line)
+
+            if match is not None:
+                return self._get_if_statement()
+
+            self._skip_line()
+            self._abort("invalid directive")
+        else:
+            return self._get_text_statement()
+
+    def _get_if_statement(self):
+        statement = IfStatement()
+        line = self._read_line()
+        match = re.match(r"#\s*if\s+([^\s].*?)\s*$", line)
+
+        if match is None:
+            self._abort("#if ... directive expected")
+
+        statement.conds_and_then_bodies.append((
+            match.group(1),
+            self._get_block_statement(r"#\s*(else|elif|endif)")
+        ))
+
+        line, _ = self._peek_line()
+
+        while True:
+            match = re.match(r"#\s*elif\s+([^\s].*?)\s*$", line)
+
+            if match is None:
+                if re.match(r"#\s*elif", line) is not None:
+                    self._abort("#elif ... directive expected")
+
+                break
+
+            self._skip_line()
+
+            statement.conds_and_then_bodies.append((
+                match.group(1),
+                self._get_block_statement(r"#\s*(else|elif|endif)")
+            ))
+
+            line, _ = self._peek_line()
+
+        if re.match(r"#\s*else\s*$", line) is None:
+            if re.match(r"#\s*else", line) is not None:
+                self._abort("#else directive expected")
+        else:
+            self._skip_line()
+            statement.else_body = self._get_block_statement(r"#\s*endif")
+            line, _ = self._peek_line()
+
+        if re.match(r"#\s*endif\s*$", self._read_line()) is None:
+            self._abort("#endif directive expected")
+
+        return statement
+
+    def _get_block_statement(self, stop_line_pattern):
+        statement = BlockStatement()
+
+        while True:
+            line, _ = self._peek_line()
+
+            if re.match(stop_line_pattern, line) is not None:
+                return statement
+
+            statement.body.append(self._get_statement())
+
+    def _get_text_statement(self):
+        statement = TextStatement()
+        line = self._read_line()
+        lines = []
+        lines_size = 0
+
+        while True:
+            while True:
+                match = CRE_STR_ANNOT.search(line)
+
+                if match is None:
+                    break
+
+                if match.group(3) is None:
+                    statement.str_annots.append((match.group(2), None))
+                else:
+                    statement.str_annots.append((match.group(2), match.group(3)[1:-1].split(",")))
+
+                line = line[:match.start(1)] + line[match.end(1):]
+
+            while True:
+                match = CRE_IN_ANNOT.search(line)
+
+                if match is None:
+                    break
+
+                statement.in_annots.append(match.group(2))
+                line = line[:match.start(1)] + line[match.end(1):]
+
+            while True:
+                match = CRE_OUT_ANNOT.search(line)
+
+                if match is None:
+                    break
+
+                statement.out_annots.append((match.group(1), match.group(3)))
+                line = line[:match.start(2)] + line[match.end(2):]
+
+            for c in ("{", "}"):
+                i = 0
+
+                while True:
+                    i = line.find(c, i)
+
+                    if i < 0:
+                        break
+
+                    j = i + 1
+
+                    while j < len(line):
+                        if line[j] != c:
+                            break
+
+                        j += 1
+
+                    i += (j - i) // 2 * 2
+
+                    if i != j:
+                        raise self._abort("bad annots: value=...{!r}".format(line[i:]))
+
+            lines.append(line)
+
+            if sys.version_info[0] == 3:
+                lines_size += len(line.encode())
+            else:
+                lines_size += len(line)
+
+            line, ok = self._peek_line()
+
+            if not ok or line.startswith("#"):
+                break
+
+            self._skip_line()
+
+        statement.lines = json.dumps("\n".join(lines))
+        statement.lines_size = lines_size + len(lines) - 1
+        return statement
+
+    def _read_line(self):
+        if self._next_line_index == len(self._lines):
+            self._abort("end of file")
+
+        line = self._lines[self._next_line_index]
+        self._next_line_index += 1
+        return line
+
+    def _peek_line(self):
+        if self._next_line_index == len(self._lines):
+            return "", False
+
+        return self._lines[self._next_line_index], True
+
+    def _skip_line(self):
+        self._next_line_index += 1
+
+    def _abort(self, message):
+        raise InvalidConfigError(self._path, "line {}: {}".format(self._next_line_index, message))
+
+
+class Program(object):
+    def __init__(self):
+        self.body = []
+
+    def accept_visit(self, visitor):
+        if visitor.visit_program(self):
+            for statement in self.body:
+                statement.accept_visit(visitor)
+
+
+class IfStatement(object):
+    def __init__(self):
+        self.conds_and_then_bodies = []
+        self.else_body = None
+
+    def accept_visit(self, visitor):
+        if visitor.visit_if_statement(self):
+            for _, then_body in self.conds_and_then_bodies:
+                then_body.accept_visit(visitor)
+
+            if self.else_body is not None:
+                self.else_body.accept_visit(visitor)
+
+
+class BlockStatement(object):
+    def __init__(self):
+        self.body = []
+
+    def accept_visit(self, visitor):
+        if visitor.visit_block_statement(self):
+            for statement in self.body:
+                statement.accept_visit(visitor)
+
+
+class TextStatement(object):
+    def __init__(self):
+        self.str_annots = []
+        self.in_annots = []
+        self.out_annots = []
+        self.lines = None
+        self.lines_size = None
+
+    def accept_visit(self, visitor):
+        visitor.visit_text_statement(self)
+
+
+class Visitor(object):
+    def visit_program(self, program):
+        return True
+
+    def visit_if_statement(self, statement):
+        return True
+
+    def visit_block_statement(self, statement):
+        return True
+
+    def visit_text_statement(self, statement):
+        return True
 
 
 class Context(object):
