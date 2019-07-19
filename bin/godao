@@ -14,6 +14,11 @@ import yaml
 import yamlordereddictloader
 
 
+if sys.version_info[0] == 3:
+    INT_MIN = -sys.maxsize - 1
+else:
+    INT_MIN = -sys.maxint - 1
+
 RE_ID = r"[_a-zA-Z][_a-zA-Z0-9]*"
 CRE_NAME = re.compile(r"^{}$".format(RE_ID))
 
@@ -47,6 +52,9 @@ CRE_IN_ANNOT = re.compile(r"""
     \:
     (
         {id}
+        (?:
+            \[i\]
+        )?
         (?:
             \.
             {id}
@@ -516,7 +524,7 @@ class MethodConfig(object):
         if len(self.output.results) == 0:
             result_zero = "nil"
         else:
-            if self.output.select_one and not kind_is_struct(self.output.reduced_result_kind):
+            if self.output.select_one and not kind_is_customized(self.output.reduced_result_kind):
                 result_zero = {
                     KIND_BOOL: "false",
                     KIND_BYTES: "nil",
@@ -551,7 +559,7 @@ class MethodConfig(object):
                         self._output_line("_expand_args := false")
 
                 if counter.max_number_of_out_annots >= 1:
-                    if kind_is_struct(method.output.reduced_result_kind):
+                    if kind_is_customized(method.output.reduced_result_kind):
                         self._output_line("var _buffer4 {}".format(reduced_result_go_type[1:]))
                         self._output_line("_record := &_buffer4")
                     else:
@@ -625,7 +633,7 @@ for _rows.Next() {
                             reduced_result_go_type=reduced_result_go_type,
                         ))
 
-                        if kind_is_struct(method.output.reduced_result_kind):
+                        if kind_is_customized(method.output.reduced_result_kind):
                             self._output_lines(Template("""\
     _record_copy := new(${reduced_result_go_type[1:]})
     *_record_copy = *_record
@@ -657,6 +665,12 @@ return _records, nil
                     self._output_line("} else {")
                     statement.else_body.accept_visit(self)
 
+                self._output_line("}")
+                return False
+
+            def visit_for_statement(self, statement):
+                self._output_line("for {} {{".format(statement.cond))
+                statement.body.accept_visit(self)
                 self._output_line("}")
                 return False
 
@@ -741,7 +755,7 @@ Loop:
                             break
 
                 if len(statement.out_annots) >= 1:
-                    if kind_is_struct(method.output.reduced_result_kind):
+                    if kind_is_customized(method.output.reduced_result_kind):
                         results = ("&_record." + result_name for _, result_name in method.sql.out_annots)
                         self._output_line("_results = append(_results, {})".format(", ".join(results)))
                     else:
@@ -846,7 +860,9 @@ class InputConfig(object):
                     param_name = check_name(path + [k], k[1:])
 
                     if isinstance(v, OrderedDict):
-                        instance.params[param_name] = parse_struct_type_config(path + [k], v)
+                        struct_type_name, struct_type_def = parse_struct_type_config(path + [k], v)
+                        is_struct_array = must_be_bool(path + [k, "is_array"], v.get("is_array", False))
+                        instance.params[param_name] = struct_type_name, struct_type_def, is_struct_array
                     else:
                         instance.params[param_name] = parse_type(path + [k], v)
 
@@ -860,16 +876,33 @@ class InputConfig(object):
         self.expanded_params = OrderedDict()
 
     def resolve(self, context):
+        bound_param_names = {}
+
         for param_name, maybe_param_kind in tuple(self.params.items()):
             if isinstance(maybe_param_kind, int):
-                self.expanded_params[param_name] = maybe_param_kind
-            else:
-                struct_type_name, struct_type_def = maybe_param_kind
-                param_kind = context.define_struct_type(self.path, struct_type_name, struct_type_def)
-                self.params[param_name] = param_kind
+                param_kind = maybe_param_kind
+                self.expanded_params[param_name] = param_kind
 
-                for field_name, field_kind in struct_type_def.items():
-                    self.expanded_params[param_name + "." + field_name] = field_kind
+                if kind_is_array(param_kind):
+                    sub_param_name = param_name + "[i]"
+                    bound_param_names[param_name] = sub_param_name
+                    bound_param_names[sub_param_name] = param_name
+                    self.expanded_params[sub_param_name] = array_element_kind(param_kind)
+            else:
+                struct_type_name, struct_type_def, is_struct_array = maybe_param_kind
+                param_kind = context.define_struct_type(self.path, struct_type_name, struct_type_def)
+
+                if is_struct_array:
+                    param_kind = context.define_struct_array_type(param_kind, struct_type_name)
+                    self.params[param_name] = param_kind
+
+                    for field_name, field_kind in struct_type_def.items():
+                        self.expanded_params[param_name + "[i]." + field_name] = field_kind
+                else:
+                    self.params[param_name] = param_kind
+
+                    for field_name, field_kind in struct_type_def.items():
+                        self.expanded_params[param_name + "." + field_name] = field_kind
 
         method = self.parent
         used_param_names = set()
@@ -882,7 +915,13 @@ class InputConfig(object):
             used_param_names.add(param_name)
 
         for param_name in set(self.expanded_params.keys()) - used_param_names:
-            raise InvalidConfigError(self.path, "param {!r} unused".format(param_name))
+            bound_param_name = bound_param_names.get(param_name)
+
+            if bound_param_name is None:
+                raise InvalidConfigError(self.path, "param {!r} unused".format(param_name))
+            else:
+                if bound_param_name not in used_param_names:
+                    raise InvalidConfigError(self.path, "param {!r} and {!r} unused".format(param_name, bound_param_name))
 
 
 class OutputConfig(object):
@@ -1046,13 +1085,18 @@ class Preprocessor(object):
             if match is not None:
                 return self._get_if_statement()
 
+            match = re.match(r"#\s*for", line)
+
+            if match is not None:
+                return self._get_for_statement()
+
             match = re.match(r"#\s*trim-suffix", line)
 
             if match is not None:
                 return self._get_trim_suffix_statement()
 
             self._skip_line()
-            self._abort("invalid directive")
+            self._abort("unknown or unexpected directive")
         else:
             return self._get_text_statement()
 
@@ -1099,6 +1143,22 @@ class Preprocessor(object):
 
         if re.match(r"#\s*endif\s*$", self._read_line()) is None:
             self._abort("#endif directive expected")
+
+        return statement
+
+    def _get_for_statement(self):
+        statement = ForStatement()
+        line = self._read_line()
+        match = re.match(r"#\s*for\s+([^\s].*?)\s*$", line)
+
+        if match is None:
+            self._abort("#for ... directive expected")
+
+        statement.cond = match.group(1)
+        statement.body = self._get_block_statement(r"#\s*endfor")
+
+        if re.match(r"#\s*endfor\s*$", self._read_line()) is None:
+            self._abort("#endfor directive expected")
 
         return statement
 
@@ -1247,6 +1307,16 @@ class IfStatement(object):
                 self.else_body.accept_visit(visitor)
 
 
+class ForStatement(object):
+    def __init__(self):
+        self.cond = None
+        self.body = None
+
+    def accept_visit(self, visitor):
+        if visitor.visit_for_statement(self):
+            self.body.accept_visit(visitor)
+
+
 class BlockStatement(object):
     def __init__(self):
         self.body = []
@@ -1284,6 +1354,9 @@ class Visitor(object):
     def visit_if_statement(self, statement):
         return True
 
+    def visit_for_statement(self, statement):
+        return True
+
     def visit_block_statement(self, statement):
         return True
 
@@ -1302,7 +1375,7 @@ class Context(object):
         self.func_codes = []
         self._config_signature = config_signature
         self._struct_kinds_and_type_digests = {}
-        self._struct_kind_2_go_type = {}
+        self._customized_kind_2_go_type = {}
         self._func_id_2_name = {}
 
     def define_struct_type(self, path, struct_type_name, struct_type_def):
@@ -1317,9 +1390,9 @@ class Context(object):
 
         if struct_kind_and_type_digest is None:
             self.struct_type_defs[struct_type_name] = struct_type_def
-            struct_kind = -len(self.struct_type_defs)
+            struct_kind = INT_MIN | (len(self.struct_type_defs) << 2)
             self._struct_kinds_and_type_digests[struct_type_name] = struct_kind, struct_type_digest
-            self._struct_kind_2_go_type[struct_kind] = "*" + struct_type_name
+            self._customized_kind_2_go_type[struct_kind] = "*" + struct_type_name
             return struct_kind
         else:
             struct_kind, struct_type_digest2 = struct_kind_and_type_digest
@@ -1330,9 +1403,14 @@ class Context(object):
 
             return struct_kind
 
+    def define_struct_array_type(self, struct_kind, struct_type_name):
+        struct_array_kind = struct_kind | KIND_FLAG_ARRAY
+        self._customized_kind_2_go_type[struct_array_kind] = "[]" + struct_type_name
+        return struct_array_kind
+
     def kind_to_go_type(self, kind):
-        if kind_is_struct(kind):
-            return self._struct_kind_2_go_type[kind]
+        if kind_is_customized(kind):
+            return self._customized_kind_2_go_type[kind]
         else:
             {
                 KIND_TIME: lambda: self.import_paths1.add("time"),
@@ -1430,10 +1508,14 @@ def parse_struct_type_config(path, struct_type_config):
 
 
 def kind_is_array(kind):
-    return kind >= 1 and (kind & KIND_FLAG_ARRAY) != 0
+    return kind & KIND_FLAG_ARRAY != 0
 
 
-def kind_is_struct(kind):
+def array_element_kind(kind):
+    return kind & ~KIND_FLAG_ARRAY
+
+
+def kind_is_customized(kind):
     return kind < 0
 
 

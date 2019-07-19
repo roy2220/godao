@@ -36,6 +36,24 @@ pip install -U git+https://github.com/let-z-go/godao
          VALUES
            (?{in:uid}, ?{in:nickname}, ?{in:gender})
 
+     $InsertMultiUserInfos:
+       input:
+         $appID: string
+         $argsList:
+             $UID: int64
+             $Nickname: string
+             $Gender: int8
+             struct_type_name: InsertUserInfoArgs
+             is_array: true
+       sql: |
+         INSERT INTO
+           `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+         VALUES
+         #for i := range argsList
+           (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
+         #endfor
+         #trim-suffix ,
+
      $SelectUserInfo:
        input:
          $appID: string
@@ -191,6 +209,39 @@ pip install -U git+https://github.com/let-z-go/godao
         _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n  (?, ?, ?)\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid, nickname, gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        return execer.ExecContext(context_, _query, _args...)
+   }
+
+   func (_self UserDAO) InsertMultiUserInfos(context_ context.Context, appID string, argsList []InsertUserInfoArgs) (sql.Result, error) {
+        return _self.doInsertMultiUserInfos(_self.db, context_, appID, argsList)
+   }
+
+   func (_self UserDAO) TxInsertMultiUserInfos(tx UserDAOTx, context_ context.Context, appID string, argsList []InsertUserInfoArgs) (sql.Result, error) {
+        return _self.doInsertMultiUserInfos((*sqlx.Tx)(tx), context_, appID, argsList)
+   }
+
+   func (UserDAO) doInsertMultiUserInfos(execer sqlx.ExecerContext, context_ context.Context, appID string, argsList []InsertUserInfoArgs) (sql.Result, error) {
+        // INSERT INTO
+        //   `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+        // VALUES
+        // #for i := range argsList
+        //   (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
+        // #endfor
+        // #trim-suffix ,
+        _buffer1 := [69]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [3]interface{}{}
+        _args := _buffer3[:0]
+        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        for i := range argsList {
+                _raw_query = append(_raw_query, "  (?, ?, ?),\n"...)
+                _args = append(_args, argsList[i].UID, argsList[i].Nickname, argsList[i].Gender)
+        }
+        _raw_query = trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(_raw_query, ",")
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
    }
@@ -363,11 +414,17 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                 _args = append(_args, args.Gender)
         }
-        _raw_query = trimSuffix_d426911264060d9d6522c6b15b373b05610d196b(_raw_query, ",")
+        _raw_query = trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(_raw_query, ",")
         _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
+   }
+
+   type InsertUserInfoArgs struct {
+        UID      int64
+        Nickname string
+        Gender   int8
    }
 
    type UserInfo struct {
@@ -381,7 +438,7 @@ pip install -U git+https://github.com/let-z-go/godao
         Gender   sql.NullInt64
    }
 
-   func trimSuffix_d426911264060d9d6522c6b15b373b05610d196b(rawQuery []byte, suffix string) []byte {
+   func trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 
