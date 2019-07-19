@@ -90,19 +90,20 @@ pip install -U git+https://github.com/let-z-go/godao
          $appID: string
          $uid: int64
          $args:
-           $Nickname: string
-           $Gender: int8
+           $Nickname: string*
+           $Gender: int8*
            struct_type_name: UpdateUserInfoArgs
        sql: |
          UPDATE
            `%s{str:TableUserInfo(appID)}`
          SET
-         #if args.Nickname != ""
+         #if args.Nickname.Valid
            `nickname` = ?{in:args.Nickname},
          #endif
-         #if args.Gender != 0
+         #if args.Gender.Valid
            `gender` = ?{in:args.Gender},
          #endif
+         #trim-suffix ,
          WHERE
            `uid` = ?{in:uid}
    ```
@@ -123,19 +124,12 @@ pip install -U git+https://github.com/let-z-go/godao
    package main
 
    import (
+        "bytes"
         "context"
         "database/sql"
         "fmt"
-        "time"
 
-        "github.com/go-sql-driver/mysql"
         "github.com/jmoiron/sqlx"
-   )
-
-   var (
-        _ = fmt.Sprintf
-        _ time.Time
-        _ mysql.NullTime
    )
 
    type UserDAO struct {
@@ -344,12 +338,13 @@ pip install -U git+https://github.com/let-z-go/godao
         // UPDATE
         //   `%s{str:TableUserInfo(appID)}`
         // SET
-        // #if args.Nickname != ""
+        // #if args.Nickname.Valid
         //   `nickname` = ?{in:args.Nickname},
         // #endif
-        // #if args.Gender != 0
+        // #if args.Gender.Valid
         //   `gender` = ?{in:args.Gender},
         // #endif
+        // #trim-suffix ,
         // WHERE
         //   `uid` = ?{in:uid}
         _buffer1 := [70]byte{}
@@ -360,14 +355,15 @@ pip install -U git+https://github.com/let-z-go/godao
         _args := _buffer3[:0]
         _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
-        if args.Nickname != "" {
+        if args.Nickname.Valid {
                 _raw_query = append(_raw_query, "  `nickname` = ?,\n"...)
                 _args = append(_args, args.Nickname)
         }
-        if args.Gender != 0 {
+        if args.Gender.Valid {
                 _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                 _args = append(_args, args.Gender)
         }
+        _raw_query = trimSuffix_d426911264060d9d6522c6b15b373b05610d196b(_raw_query, ",")
         _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
@@ -381,7 +377,37 @@ pip install -U git+https://github.com/let-z-go/godao
    }
 
    type UpdateUserInfoArgs struct {
-        Nickname string
-        Gender   int8
+        Nickname sql.NullString
+        Gender   sql.NullInt64
+   }
+
+   func trimSuffix_d426911264060d9d6522c6b15b373b05610d196b(rawQuery []byte, suffix string) []byte {
+        n := len(rawQuery)
+        i := n
+
+   Loop:
+        for i >= 1 {
+                switch rawQuery[i-1] {
+                case '\t', '\n', '\v', '\f', '\r', ' ':
+                default:
+                        break Loop
+                }
+
+                i--
+        }
+
+        if i >= 1 && bytes.HasSuffix(rawQuery[:i], []byte(suffix)) {
+                j := i - len(suffix)
+
+                for i < n {
+                        rawQuery[j] = rawQuery[i]
+                        i++
+                        j++
+                }
+
+                rawQuery = rawQuery[:j]
+        }
+
+        return rawQuery
    }
    ```
