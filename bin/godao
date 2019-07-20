@@ -484,11 +484,11 @@ class MethodConfig(object):
                 self._query_size = 0
 
             def visit_if_statement(self, statement):
-                backup = self._out_annot_count, self._in_annot_count, self._out_annot_count, self._query_size
+                backup = self._str_annot_count, self._in_annot_count, self._out_annot_count, self._query_size
 
                 for _, then_body in statement.conds_and_then_bodies:
                     then_body.accept_visit(self)
-                    self._out_annot_count, self._in_annot_count, self._out_annot_count, self._query_size = backup
+                    self._str_annot_count, self._in_annot_count, self._out_annot_count, self._query_size = backup
 
                 if statement.else_body is not None:
                     statement.else_body.accept_visit(self)
@@ -498,6 +498,32 @@ class MethodConfig(object):
                     self.max_number_of_in_annots, \
                     self.max_number_of_out_annots, \
                     self.max_query_size
+                return False
+
+            def visit_for_statement(self, statement):
+                backup = self._str_annot_count, self._in_annot_count, self._out_annot_count, self._query_size
+                statement.body.accept_visit(self)
+                n = statement.estimated_loop_count - 1
+
+                if n >= 1:
+                    str_annot_count, in_annot_count, out_annot_count, query_size = backup
+                    self._str_annot_count += n * (self._str_annot_count - str_annot_count)
+                    self._in_annot_count += n * (self._in_annot_count - in_annot_count)
+                    self._out_annot_count += n * (self._out_annot_count - out_annot_count)
+                    self._query_size += n * (self._query_size - query_size)
+
+                    if self._str_annot_count > self.max_number_of_str_annots:
+                        self.max_number_of_str_annots = self._str_annot_count
+
+                    if self._in_annot_count > self.max_number_of_in_annots:
+                        self.max_number_of_in_annots = self._in_annot_count
+
+                    if self._out_annot_count > self.max_number_of_out_annots:
+                        self.max_number_of_out_annots = self._out_annot_count
+
+                    if self._query_size > self.max_query_size:
+                        self.max_query_size = self._query_size
+
                 return False
 
             def visit_text_statement(self, statement):
@@ -530,8 +556,11 @@ class MethodConfig(object):
         else:
             reduced_result_go_type = context.kind_to_go_type(self.output.reduced_result_kind)
 
-        if len(self.output.results) == 0:
-            result_zero = "nil"
+        if reduced_result_go_type is None:
+            if self.output.as_result is None:
+                result_zero = "nil"
+            else:
+                result_zero = "0"
         else:
             if self.output.select_one and not kind_is_customized(self.output.reduced_result_kind):
                 result_zero = {
@@ -605,7 +634,20 @@ if _expand_args {
                     args_part = ", _args..."
 
                 if reduced_result_go_type is None:
-                    self._output_line("return execer.ExecContext(context_, _query{})".format(args_part))
+                    if method.output.as_result is None:
+                        self._output_line("return execer.ExecContext(context_, _query{})".format(args_part))
+                    else:
+                        self._output_lines(Template("""\
+_result, _e := execer.ExecContext(context_, _query${args_part})
+if _e != nil {
+    return ${result_zero}, _e
+}
+return _result.${"LastInsertId" if as_result == "last_insert_id" else "RowsAffected"}()
+""").render(
+                            args_part=args_part,
+                            result_zero=result_zero,
+                            as_result=method.output.as_result,
+                        ))
                 else:
                     if method.output.select_one:
                         self._output_line("if _e := queryer.QueryRowxContext(context_, _query{}).Scan(_results...); _e != nil {{".format(args_part))
@@ -789,7 +831,7 @@ func (_self ${dao.name}) ${method.name}(context_ context.Context\\
 % endfor
 ) (\\
 % if reduced_result_go_type is None:
-sql.Result\\
+${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
 ${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
@@ -808,7 +850,7 @@ tx ${dao.name}Tx, context_ context.Context\\
 % endfor
 ) (\\
 % if reduced_result_go_type is None:
-sql.Result\\
+${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
 ${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
@@ -827,7 +869,7 @@ ${"execer sqlx.ExecerContext" if reduced_result_go_type is None else "queryer sq
 % endfor
 ) (\\
 % if reduced_result_go_type is None:
-sql.Result\\
+${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
 ${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
 % endif
@@ -974,6 +1016,9 @@ class OutputConfig(object):
             instance.select_one = must_be_bool(path + ["select_one"], raw.get("select_one", False))
             instance.ignore_no_rows = must_be_bool(path + ["ignore_no_rows"], raw.get("ignore_no_rows", False))
 
+            if "as_result" in raw:
+                instance.as_result = must_be(path + ["as_result"], raw["as_result"], "last_insert_id", "rows_affected")
+
         return instance
 
     def __init__(self, parent, path):
@@ -983,6 +1028,7 @@ class OutputConfig(object):
         self.struct_type_name = None
         self.select_one = None
         self.ignore_no_rows = None
+        self.as_result = None
 
         self.reduced_result_kind = None
 
@@ -1001,11 +1047,14 @@ class OutputConfig(object):
                 error(self.path, "result {!r} should not be array".format(result_name))
 
         if len(self.results) == 0 and self.struct_type_name is not None:
-            warn(self.path, "useless struct type name: value={!r}".format(self.struct_type_name))
+            warn(self.path, "useless `struct_type_name`")
             self.struct_type_name = None
 
         if len(self.results) >= 2 and self.struct_type_name is None:
-            error(self.path, "missing struct type name")
+            error(self.path, "missing `struct_type_name`")
+
+        if len(self.results) >= 1 and self.as_result is not None:
+            warn(self.path, "useless `as_result`")
 
         if len(self.results) >= 1:
             if self.struct_type_name is None:
@@ -1194,12 +1243,17 @@ class Preprocessor(object):
     def _get_for_statement(self):
         statement = ForStatement()
         line = self._read_line()
-        match = re.match(r"#\s*for\s+([^\s].*?)\s*$", line)
+        match = re.match(r"#\s*for(\(\d+\))?\s+([^\s].*?)\s*$", line)
 
         if match is None:
             self._abort("#for ... directive expected")
 
-        statement.cond = match.group(1)
+        if match.group(1) is None:
+            statement.estimated_loop_count = 1
+        else:
+            statement.estimated_loop_count = int(match.group(1)[1:-1])
+
+        statement.cond = match.group(2)
         statement.body = self._get_block_statement(r"#\s*endfor")
 
         if re.match(r"#\s*endfor\s*$", self._read_line()) is None:
@@ -1360,6 +1414,7 @@ class IfStatement(object):
 
 class ForStatement(object):
     def __init__(self):
+        self.estimated_loop_count = None
         self.cond = None
         self.body = None
 
@@ -1503,32 +1558,46 @@ def load_config(config_text):
     return Config.load(sha1.hexdigest(), [""], raw_config)
 
 
-def must_be_bool(path, object_):
-    if not isinstance(object_, bool):
-        error(path, "must be bool, type={!r}".format(type(object_)))
+def must_be_bool(path, value):
+    if not isinstance(value, bool):
+        error(path, "must be bool, type={!r}".format(type(value)))
 
-    return object_
-
-
-def must_be_str(path, object_):
-    if not isinstance(object_, str):
-        error(path, "must be str, type={!r}".format(type(object_)))
-
-    return object_
+    return value
 
 
-def must_be_list(path, object_):
-    if not isinstance(object_, list):
-        error(path, "must be list, value={!r}".format(type(object_)))
+def must_be_str(path, value):
+    if not isinstance(value, str):
+        error(path, "must be str, type={!r}".format(type(value)))
 
-    return object_
+    return value
 
 
-def must_be_dict(path, object_):
-    if not isinstance(object_, OrderedDict):
-        error(path, "must be dict, value={!r}".format(type(object_)))
+def must_be_list(path, value):
+    if not isinstance(value, list):
+        error(path, "must be list, type={!r}".format(type(value)))
 
-    return object_
+    return value
+
+
+def must_be_dict(path, value):
+    if not isinstance(value, OrderedDict):
+        error(path, "must be dict, type={!r}".format(type(value)))
+
+    return value
+
+
+def must_be(path, value, *valid_values):
+    for valid_value in valid_values:
+        if valid_value == value:
+            return value
+
+    message = "must be {!r}".format(valid_values[0])
+
+    for valid_value in valid_values[1:]:
+        message += " or {!r}".format(valid_value)
+
+    message += ", value={!r}".format(value)
+    error(path, message)
 
 
 def check_name(path, name):
