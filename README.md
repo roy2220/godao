@@ -48,7 +48,6 @@ pip install -U git+https://github.com/let-z-go/godao
          $Nickname: string
          $Gender: int8
          struct_type_name: UserInfo
-         select_one: true
          ignore_no_rows: true
        sql: |
          SELECT
@@ -105,7 +104,7 @@ pip install -U git+https://github.com/let-z-go/godao
          $uids: int64[]
        output:
          <<: *user_info_struct
-         select_one: false
+         is_array: true
        sql: |
          SELECT
            `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
@@ -120,7 +119,6 @@ pip install -U git+https://github.com/let-z-go/godao
          $uid: int64
        output:
          $nickname: string
-         select_one: true
        sql: |
          SELECT
            `nickname{out:nickname}`
@@ -139,7 +137,6 @@ pip install -U git+https://github.com/let-z-go/godao
            struct_type_name: UserInfoColumns
        output:
          <<: *user_info_struct
-         select_one: true
        sql: |
          SELECT
          #if false
@@ -325,7 +322,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                 _args = append(_args, args.Gender)
         }
-        _raw_query = trimSuffix_96ab489effb7a157534b6d47caab6ce079690aa7(_raw_query, ",")
+        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
         _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
@@ -364,7 +361,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  (?, ?, ?),\n"...)
                 _args = append(_args, argsList[i].UID, argsList[i].Nickname, argsList[i].Gender)
         }
-        _raw_query = trimSuffix_96ab489effb7a157534b6d47caab6ce079690aa7(_raw_query, ",")
+        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
    }
@@ -508,7 +505,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender`,\n"...)
                 _results = append(_results, &_record.Gender)
         }
-        _raw_query = trimSuffix_96ab489effb7a157534b6d47caab6ce079690aa7(_raw_query, ",")
+        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
         _raw_query = append(_raw_query, "FROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
@@ -544,7 +541,7 @@ pip install -U git+https://github.com/let-z-go/godao
         GetGender   bool
    }
 
-   func trimSuffix_96ab489effb7a157534b6d47caab6ce079690aa7(rawQuery []byte, suffix string) []byte {
+   func trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 

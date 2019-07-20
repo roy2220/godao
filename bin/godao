@@ -562,15 +562,15 @@ class MethodConfig(object):
             else:
                 result_zero = "0"
         else:
-            if self.output.select_one and not kind_is_customized(self.output.reduced_result_kind):
+            if self.output.is_array or kind_is_customized(self.output.reduced_result_kind):
+                result_zero = "nil"
+            else:
                 result_zero = {
                     KIND_BOOL: "false",
                     KIND_BYTES: "nil",
                     KIND_STRING: "\"\"",
                     KIND_TIME: "time.Time{}",
                 }.get(self.output.reduced_result_kind, "0")
-            else:
-                result_zero = "nil"
 
         class CodeGenerator(Visitor):
             def __init__(self, line_prefix, indent):
@@ -649,24 +649,7 @@ return _result.${"LastInsertId" if as_result == "last_insert_id" else "RowsAffec
                             as_result=method.output.as_result,
                         ))
                 else:
-                    if method.output.select_one:
-                        self._output_line("if _e := queryer.QueryRowxContext(context_, _query{}).Scan(_results...); _e != nil {{".format(args_part))
-
-                        if method.output.ignore_no_rows:
-                            self._output_lines("""\
-    if _e == sql.ErrNoRows {
-        _e = nil
-    }
-""")
-
-                        self._output_lines(Template("""\
-    return ${result_zero}, _e
-}
-return _record, nil
-""").render(
-                            result_zero=result_zero,
-                        ))
-                    else:
+                    if method.output.is_array:
                         self._output_lines(Template("""\
 _rows, _e := queryer.QueryxContext(context_, _query${args_part})
 if _e != nil {
@@ -700,6 +683,23 @@ for _rows.Next() {
 _rows.Close()
 return _records, nil
 """)
+                    else:
+                        self._output_line("if _e := queryer.QueryRowxContext(context_, _query{}).Scan(_results...); _e != nil {{".format(args_part))
+
+                        if method.output.ignore_no_rows:
+                            self._output_lines("""\
+    if _e == sql.ErrNoRows {
+        _e = nil
+    }
+""")
+
+                        self._output_lines(Template("""\
+    return ${result_zero}, _e
+}
+return _record, nil
+""").render(
+                            result_zero=result_zero,
+                        ))
 
                 return False
 
@@ -833,7 +833,7 @@ func (_self ${dao.name}) ${method.name}(context_ context.Context\\
 % if reduced_result_go_type is None:
 ${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
-${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
+${("[]" if method.output.is_array else "") + reduced_result_go_type}\\
 % endif
 , error) {
     return _self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}(_self.db, context_\\
@@ -852,7 +852,7 @@ tx ${dao.name}Tx, context_ context.Context\\
 % if reduced_result_go_type is None:
 ${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
-${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
+${("[]" if method.output.is_array else "") + reduced_result_go_type}\\
 % endif
 , error) {
     return _self.do${camel_case_to_pascal_case(method.name) if is_camel_case(method.name) else method.name}((*sqlx.Tx)(tx), context_\\
@@ -871,7 +871,7 @@ ${"execer sqlx.ExecerContext" if reduced_result_go_type is None else "queryer sq
 % if reduced_result_go_type is None:
 ${"sql.Result" if method.output.as_result is None else "int64"}\\
 % else:
-${("" if method.output.select_one else "[]") + reduced_result_go_type}\\
+${("[]" if method.output.is_array else "") + reduced_result_go_type}\\
 % endif
 , error) {
 % for line in method.sql.raw.split("\\n"):
@@ -912,8 +912,8 @@ class InputConfig(object):
 
                     if isinstance(v, OrderedDict):
                         struct_type_name, struct_type_def = parse_struct_type_config(path + [k], v)
-                        is_struct_array = must_be_bool(path + [k, "is_array"], v.get("is_array", False))
-                        instance.params[param_name] = struct_type_name, struct_type_def, is_struct_array
+                        is_array = must_be_bool(path + [k, "is_array"], v.get("is_array", False))
+                        instance.params[param_name] = struct_type_name, struct_type_def, is_array
                     else:
                         instance.params[param_name] = parse_type(path + [k], v)
 
@@ -965,10 +965,10 @@ class InputConfig(object):
                         if re.search(r"(^|\W){}(\W|$)".format(param_name), method.sql.embedded_code) is None:
                             warn(self.path, "param {!r} unused".format(param_name))
             else:
-                struct_type_name, struct_type_def, is_struct_array = maybe_param_kind
+                struct_type_name, struct_type_def, is_array = maybe_param_kind
                 param_kind = context.define_struct_type(self.path, struct_type_name, struct_type_def)
 
-                if is_struct_array:
+                if is_array:
                     param_kind = context.define_struct_array_type(param_kind, struct_type_name)
                     self.params[param_name] = param_kind
 
@@ -1013,7 +1013,7 @@ class OutputConfig(object):
             if "struct_type_name" in raw:
                 instance.struct_type_name = check_name(path + ["struct_type_name"], raw["struct_type_name"])
 
-            instance.select_one = must_be_bool(path + ["select_one"], raw.get("select_one", False))
+            instance.is_array = must_be_bool(path + ["is_array"], raw.get("is_array", False))
             instance.ignore_no_rows = must_be_bool(path + ["ignore_no_rows"], raw.get("ignore_no_rows", False))
 
             if "as_result" in raw:
@@ -1026,7 +1026,7 @@ class OutputConfig(object):
         self.path = path
         self.results = OrderedDict()
         self.struct_type_name = None
-        self.select_one = None
+        self.is_array = None
         self.ignore_no_rows = None
         self.as_result = None
 
@@ -1052,9 +1052,6 @@ class OutputConfig(object):
 
         if len(self.results) >= 2 and self.struct_type_name is None:
             error(self.path, "missing `struct_type_name`")
-
-        if len(self.results) >= 1 and self.as_result is not None:
-            warn(self.path, "useless `as_result`")
 
         if len(self.results) >= 1:
             if self.struct_type_name is None:
