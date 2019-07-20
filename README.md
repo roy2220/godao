@@ -12,7 +12,7 @@ DAO (Data Access Object) Generator for Go
 pip install -U git+https://github.com/let-z-go/godao
 ```
 
-## Usage examples
+## Quick Start
 
 1. Define DAO with YAML (`sample.yaml`):
 
@@ -22,41 +22,24 @@ pip install -U git+https://github.com/let-z-go/godao
    $UserDAO:
      strings:
        $TableUserInfo:
+         value: user_info
+
+       $TableUserInfoX:
          maker_func_name: LocateUserInfoTable
 
      $InsertUserInfo:
        input:
-         $appID: string
          $uid: int64
          $nickname: string
          $gender: int8
        sql: |
          INSERT INTO
-           `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+           `%s{str:TableUserInfo}` (`uid`, `nickname`, `gender`)
          VALUES
            (?{in:uid}, ?{in:nickname}, ?{in:gender})
 
-     $InsertMultiUserInfos:
-       input:
-         $appID: string
-         $argsList:
-             $UID: int64
-             $Nickname: string
-             $Gender: int8
-             struct_type_name: InsertUserInfoArgs
-             is_array: true
-       sql: |
-         INSERT INTO
-           `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
-         VALUES
-         #for i := range argsList
-           (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
-         #endfor
-         #trim-suffix ,
-
      $SelectUserInfo:
        input:
-         $appID: string
          $uid: int64
        output: &user_info_struct
          $UID: int64
@@ -69,9 +52,48 @@ pip install -U git+https://github.com/let-z-go/godao
          SELECT
            `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
          FROM
-           `%s{str:TableUserInfo(appID)}`
+           `%s{str:TableUserInfo}`
          WHERE
            `uid` = ?{in:uid}
+
+     $UpdateUserInfo:
+       input:
+         $uid: int64
+         $args:
+           $Nickname: string*
+           $Gender: int8*
+           struct_type_name: UpdateUserInfoArgs
+       sql: |
+         UPDATE
+           `%s{str:TableUserInfo}`
+         SET
+         #if args.Nickname.Valid
+           `nickname` = ?{in:args.Nickname},
+         #endif
+         #if args.Gender.Valid
+           `gender` = ?{in:args.Gender},
+         #endif
+         #trim-suffix ,
+         WHERE
+           `uid` = ?{in:uid}
+
+     $InsertMultiUserInfos:
+       input:
+         $appID: string
+         $argsList:
+             $UID: int64
+             $Nickname: string
+             $Gender: int8
+             struct_type_name: InsertUserInfoArgs
+             is_array: true
+       sql: |
+         INSERT INTO
+           `%s{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
+         VALUES
+         #for i := range argsList
+           (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
+         #endfor
+         #trim-suffix ,
 
      $SelectMultiUserInfos:
        input:
@@ -84,7 +106,7 @@ pip install -U git+https://github.com/let-z-go/godao
          SELECT
            `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
          FROM
-           `%s{str:TableUserInfo(appID)}`
+           `%s{str:TableUserInfoX(appID)}`
          WHERE
            `uid` IN (?{in:uids})
 
@@ -99,29 +121,35 @@ pip install -U git+https://github.com/let-z-go/godao
          SELECT
            `nickname{out:nickname}`
          FROM
-           `%s{str:TableUserInfo(appID)}`
+           `%s{str:TableUserInfoX(appID)}`
          WHERE
            `uid` = ?{in:uid}
 
-     $UpdateUserInfo:
+     $SelectColumnsOfUserInfo:
        input:
          $appID: string
          $uid: int64
          $args:
-           $Nickname: string*
-           $Gender: int8*
-           struct_type_name: UpdateUserInfoArgs
+           $SelectNickname: bool
+           $SelectGender: bool
+           struct_type_name: UserInfoColumns
+       output:
+         <<: *user_info_struct
+         select_one: true
        sql: |
-         UPDATE
-           `%s{str:TableUserInfo(appID)}`
-         SET
-         #if args.Nickname.Valid
-           `nickname` = ?{in:args.Nickname},
+         SELECT
+         #if false
+           `uid{out:UID}`,
          #endif
-         #if args.Gender.Valid
-           `gender` = ?{in:args.Gender},
+         #if args.SelectNickname
+           `nickname{out:Nickname}`,
+         #endif
+         #if args.SelectGender
+           `gender{out:Gender}`,
          #endif
          #trim-suffix ,
+         FROM
+           `%s{str:TableUserInfoX(appID)}`
          WHERE
            `uid` = ?{in:uid}
    ```
@@ -148,6 +176,10 @@ pip install -U git+https://github.com/let-z-go/godao
         "fmt"
 
         "github.com/jmoiron/sqlx"
+   )
+
+   const (
+        UserDAO_TableUserInfo = "user_info"
    )
 
    type UserDAO struct {
@@ -187,17 +219,17 @@ pip install -U git+https://github.com/let-z-go/godao
         return UserDAO{db}
    }
 
-   func (_self UserDAO) InsertUserInfo(context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
-        return _self.doInsertUserInfo(_self.db, context_, appID, uid, nickname, gender)
+   func (_self UserDAO) InsertUserInfo(context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
+        return _self.doInsertUserInfo(_self.db, context_, uid, nickname, gender)
    }
 
-   func (_self UserDAO) TxInsertUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
-        return _self.doInsertUserInfo((*sqlx.Tx)(tx), context_, appID, uid, nickname, gender)
+   func (_self UserDAO) TxInsertUserInfo(tx UserDAOTx, context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
+        return _self.doInsertUserInfo((*sqlx.Tx)(tx), context_, uid, nickname, gender)
    }
 
-   func (UserDAO) doInsertUserInfo(execer sqlx.ExecerContext, context_ context.Context, appID string, uid int64, nickname string, gender int8) (sql.Result, error) {
+   func (UserDAO) doInsertUserInfo(execer sqlx.ExecerContext, context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
         // INSERT INTO
-        //   `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+        //   `%s{str:TableUserInfo}` (`uid`, `nickname`, `gender`)
         // VALUES
         //   (?{in:uid}, ?{in:nickname}, ?{in:gender})
         _buffer1 := [68]byte{}
@@ -207,8 +239,91 @@ pip install -U git+https://github.com/let-z-go/godao
         _buffer3 := [3]interface{}{}
         _args := _buffer3[:0]
         _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n  (?, ?, ?)\n"...)
-        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        _query_substrs = append(_query_substrs, UserDAO_TableUserInfo)
         _args = append(_args, uid, nickname, gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        return execer.ExecContext(context_, _query, _args...)
+   }
+
+   func (_self UserDAO) SelectUserInfo(context_ context.Context, uid int64) (*UserInfo, error) {
+        return _self.doSelectUserInfo(_self.db, context_, uid)
+   }
+
+   func (_self UserDAO) TxSelectUserInfo(tx UserDAOTx, context_ context.Context, uid int64) (*UserInfo, error) {
+        return _self.doSelectUserInfo((*sqlx.Tx)(tx), context_, uid)
+   }
+
+   func (UserDAO) doSelectUserInfo(queryer sqlx.QueryerContext, context_ context.Context, uid int64) (*UserInfo, error) {
+        // SELECT
+        //   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
+        // FROM
+        //   `%s{str:TableUserInfo}`
+        // WHERE
+        //   `uid` = ?{in:uid}
+        _buffer1 := [67]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [1]interface{}{}
+        _args := _buffer3[:0]
+        var _buffer4 UserInfo
+        _record := &_buffer4
+        _buffer5 := [3]interface{}{}
+        _results := _buffer5[:0]
+        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
+        _query_substrs = append(_query_substrs, UserDAO_TableUserInfo)
+        _args = append(_args, uid)
+        _results = append(_results, &_record.UID, &_record.Nickname, &_record.Gender)
+        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
+        if _e := queryer.QueryRowxContext(context_, _query, _args...).Scan(_results...); _e != nil {
+                if _e == sql.ErrNoRows {
+                        _e = nil
+                }
+                return nil, _e
+        }
+        return _record, nil
+   }
+
+   func (_self UserDAO) UpdateUserInfo(context_ context.Context, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
+        return _self.doUpdateUserInfo(_self.db, context_, uid, args)
+   }
+
+   func (_self UserDAO) TxUpdateUserInfo(tx UserDAOTx, context_ context.Context, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
+        return _self.doUpdateUserInfo((*sqlx.Tx)(tx), context_, uid, args)
+   }
+
+   func (UserDAO) doUpdateUserInfo(execer sqlx.ExecerContext, context_ context.Context, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
+        // UPDATE
+        //   `%s{str:TableUserInfo}`
+        // SET
+        // #if args.Nickname.Valid
+        //   `nickname` = ?{in:args.Nickname},
+        // #endif
+        // #if args.Gender.Valid
+        //   `gender` = ?{in:args.Gender},
+        // #endif
+        // #trim-suffix ,
+        // WHERE
+        //   `uid` = ?{in:uid}
+        _buffer1 := [70]byte{}
+        _raw_query := _buffer1[:0]
+        _buffer2 := [1]interface{}{}
+        _query_substrs := _buffer2[:0]
+        _buffer3 := [3]interface{}{}
+        _args := _buffer3[:0]
+        _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET\n"...)
+        _query_substrs = append(_query_substrs, UserDAO_TableUserInfo)
+        if args.Nickname.Valid {
+                _raw_query = append(_raw_query, "  `nickname` = ?,\n"...)
+                _args = append(_args, args.Nickname)
+        }
+        if args.Gender.Valid {
+                _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
+                _args = append(_args, args.Gender)
+        }
+        _raw_query = trimSuffix_adcf0999d07b68a8fb19de1242bacb34a5323873(_raw_query, ",")
+        _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
+        _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
    }
@@ -223,7 +338,7 @@ pip install -U git+https://github.com/let-z-go/godao
 
    func (UserDAO) doInsertMultiUserInfos(execer sqlx.ExecerContext, context_ context.Context, appID string, argsList []InsertUserInfoArgs) (sql.Result, error) {
         // INSERT INTO
-        //   `%s{str:TableUserInfo(appID)}` (`uid`, `nickname`, `gender`)
+        //   `%s{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
         // VALUES
         // #for i := range argsList
         //   (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
@@ -241,48 +356,9 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  (?, ?, ?),\n"...)
                 _args = append(_args, argsList[i].UID, argsList[i].Nickname, argsList[i].Gender)
         }
-        _raw_query = trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(_raw_query, ",")
+        _raw_query = trimSuffix_adcf0999d07b68a8fb19de1242bacb34a5323873(_raw_query, ",")
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
-   }
-
-   func (_self UserDAO) SelectUserInfo(context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-        return _self.doSelectUserInfo(_self.db, context_, appID, uid)
-   }
-
-   func (_self UserDAO) TxSelectUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-        return _self.doSelectUserInfo((*sqlx.Tx)(tx), context_, appID, uid)
-   }
-
-   func (UserDAO) doSelectUserInfo(queryer sqlx.QueryerContext, context_ context.Context, appID string, uid int64) (*UserInfo, error) {
-        // SELECT
-        //   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
-        // FROM
-        //   `%s{str:TableUserInfo(appID)}`
-        // WHERE
-        //   `uid` = ?{in:uid}
-        _buffer1 := [67]byte{}
-        _raw_query := _buffer1[:0]
-        _buffer2 := [1]interface{}{}
-        _query_substrs := _buffer2[:0]
-        _buffer3 := [1]interface{}{}
-        _args := _buffer3[:0]
-        var _buffer4 UserInfo
-        _record := &_buffer4
-        _buffer5 := [3]interface{}{}
-        _results := _buffer5[:0]
-        _raw_query = append(_raw_query, "SELECT\n  `uid`, `nickname`, `gender`\nFROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
-        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
-        _args = append(_args, uid)
-        _results = append(_results, &_record.UID, &_record.Nickname, &_record.Gender)
-        _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
-        if _e := queryer.QueryRowxContext(context_, _query, _args...).Scan(_results...); _e != nil {
-                if _e == sql.ErrNoRows {
-                        _e = nil
-                }
-                return nil, _e
-        }
-        return _record, nil
    }
 
    func (_self UserDAO) SelectMultiUserInfos(context_ context.Context, appID string, uids []int64) ([]*UserInfo, error) {
@@ -297,7 +373,7 @@ pip install -U git+https://github.com/let-z-go/godao
         // SELECT
         //   `uid{out:UID}`, `nickname{out:Nickname}`, `gender{out:Gender}`
         // FROM
-        //   `%s{str:TableUserInfo(appID)}`
+        //   `%s{str:TableUserInfoX(appID)}`
         // WHERE
         //   `uid` IN (?{in:uids})
         _buffer1 := [70]byte{}
@@ -354,7 +430,7 @@ pip install -U git+https://github.com/let-z-go/godao
         // SELECT
         //   `nickname{out:nickname}`
         // FROM
-        //   `%s{str:TableUserInfo(appID)}`
+        //   `%s{str:TableUserInfoX(appID)}`
         // WHERE
         //   `uid` = ?{in:uid}
         _buffer1 := [50]byte{}
@@ -377,54 +453,65 @@ pip install -U git+https://github.com/let-z-go/godao
         return _record, nil
    }
 
-   func (_self UserDAO) UpdateUserInfo(context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-        return _self.doUpdateUserInfo(_self.db, context_, appID, uid, args)
+   func (_self UserDAO) SelectColumnsOfUserInfo(context_ context.Context, appID string, uid int64, args *UserInfoColumns) (*UserInfo, error) {
+        return _self.doSelectColumnsOfUserInfo(_self.db, context_, appID, uid, args)
    }
 
-   func (_self UserDAO) TxUpdateUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-        return _self.doUpdateUserInfo((*sqlx.Tx)(tx), context_, appID, uid, args)
+   func (_self UserDAO) TxSelectColumnsOfUserInfo(tx UserDAOTx, context_ context.Context, appID string, uid int64, args *UserInfoColumns) (*UserInfo, error) {
+        return _self.doSelectColumnsOfUserInfo((*sqlx.Tx)(tx), context_, appID, uid, args)
    }
 
-   func (UserDAO) doUpdateUserInfo(execer sqlx.ExecerContext, context_ context.Context, appID string, uid int64, args *UpdateUserInfoArgs) (sql.Result, error) {
-        // UPDATE
-        //   `%s{str:TableUserInfo(appID)}`
-        // SET
-        // #if args.Nickname.Valid
-        //   `nickname` = ?{in:args.Nickname},
+   func (UserDAO) doSelectColumnsOfUserInfo(queryer sqlx.QueryerContext, context_ context.Context, appID string, uid int64, args *UserInfoColumns) (*UserInfo, error) {
+        // SELECT
+        // #if false
+        //   `uid{out:UID}`,
         // #endif
-        // #if args.Gender.Valid
-        //   `gender` = ?{in:args.Gender},
+        // #if args.SelectNickname
+        //   `nickname{out:Nickname}`,
+        // #endif
+        // #if args.SelectGender
+        //   `gender{out:Gender}`,
         // #endif
         // #trim-suffix ,
+        // FROM
+        //   `%s{str:TableUserInfoX(appID)}`
         // WHERE
         //   `uid` = ?{in:uid}
-        _buffer1 := [70]byte{}
+        _buffer1 := [72]byte{}
         _raw_query := _buffer1[:0]
         _buffer2 := [1]interface{}{}
         _query_substrs := _buffer2[:0]
-        _buffer3 := [3]interface{}{}
+        _buffer3 := [1]interface{}{}
         _args := _buffer3[:0]
-        _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET\n"...)
+        var _buffer4 UserInfo
+        _record := &_buffer4
+        _buffer5 := [3]interface{}{}
+        _results := _buffer5[:0]
+        _raw_query = append(_raw_query, "SELECT\n"...)
+        if false {
+                _raw_query = append(_raw_query, "  `uid`,\n"...)
+                _results = append(_results, &_record.UID)
+        }
+        if args.SelectNickname {
+                _raw_query = append(_raw_query, "  `nickname`,\n"...)
+                _results = append(_results, &_record.Nickname)
+        }
+        if args.SelectGender {
+                _raw_query = append(_raw_query, "  `gender`,\n"...)
+                _results = append(_results, &_record.Gender)
+        }
+        _raw_query = trimSuffix_adcf0999d07b68a8fb19de1242bacb34a5323873(_raw_query, ",")
+        _raw_query = append(_raw_query, "FROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
-        if args.Nickname.Valid {
-                _raw_query = append(_raw_query, "  `nickname` = ?,\n"...)
-                _args = append(_args, args.Nickname)
-        }
-        if args.Gender.Valid {
-                _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
-                _args = append(_args, args.Gender)
-        }
-        _raw_query = trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(_raw_query, ",")
-        _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
-        return execer.ExecContext(context_, _query, _args...)
-   }
-
-   type InsertUserInfoArgs struct {
-        UID      int64
-        Nickname string
-        Gender   int8
+        if _e := queryer.QueryRowxContext(context_, _query, _args...).Scan(_results...); _e != nil {
+                if _e == sql.ErrNoRows {
+                        _e = nil
+                }
+                return nil, _e
+        }
+        return _record, nil
    }
 
    type UserInfo struct {
@@ -438,7 +525,18 @@ pip install -U git+https://github.com/let-z-go/godao
         Gender   sql.NullInt64
    }
 
-   func trimSuffix_dbaaccc072df92c54f1d380475b621d65b5310b9(rawQuery []byte, suffix string) []byte {
+   type InsertUserInfoArgs struct {
+        UID      int64
+        Nickname string
+        Gender   int8
+   }
+
+   type UserInfoColumns struct {
+        SelectNickname bool
+        SelectGender   bool
+   }
+
+   func trimSuffix_adcf0999d07b68a8fb19de1242bacb34a5323873(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 
