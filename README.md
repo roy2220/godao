@@ -35,8 +35,8 @@ pip install -U git+https://github.com/let-z-go/godao
          $uid: int64
          $nickname: string
          $gender: int8
-       # output:
-       #   as_result: last_insert_id
+       output:
+         as_result: last_insert_id
        sql: |
          INSERT INTO
            `%s#{str:TableUserInfo}` (`uid`, `nickname`, `gender`)
@@ -97,12 +97,12 @@ pip install -U git+https://github.com/let-z-go/godao
              struct_type_name: AddUserInfoArgs
              is_array: true
        sql: |
-         INSERT INTO
-           `%s#{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
-         VALUES
          #if len(argsList) == 0
          #  error errors.New("invalid argsList")
          #endif
+         INSERT INTO
+           `%s#{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
+         VALUES
          #for i := range argsList
          #  if i >= 1
            ,
@@ -150,12 +150,12 @@ pip install -U git+https://github.com/let-z-go/godao
        output:
          <<: *user_info_struct
        sql: |
+         #if !(args.GetNickname || args.GetGender)
+         #  error errors.New("invalid args")
+         #endif
          SELECT
          #if false
            `uid#{out:UID}`,
-         #endif
-         #if args.GetNickname || args.GetGender
-         #  error errors.New("invalid args")
          #endif
          #if args.GetNickname
            `nickname#{out:Nickname}`,
@@ -235,15 +235,15 @@ pip install -U git+https://github.com/let-z-go/godao
         return UserDAO{db}
    }
 
-   func (_self UserDAO) AddUserInfo(context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
+   func (_self UserDAO) AddUserInfo(context_ context.Context, uid int64, nickname string, gender int8) (int64, error) {
         return _self.doAddUserInfo(_self.db, context_, uid, nickname, gender)
    }
 
-   func (_self UserDAO) TxAddUserInfo(tx UserDAOTx, context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
+   func (_self UserDAO) TxAddUserInfo(tx UserDAOTx, context_ context.Context, uid int64, nickname string, gender int8) (int64, error) {
         return _self.doAddUserInfo((*sqlx.Tx)(tx), context_, uid, nickname, gender)
    }
 
-   func (UserDAO) doAddUserInfo(execer sqlx.ExecerContext, context_ context.Context, uid int64, nickname string, gender int8) (sql.Result, error) {
+   func (UserDAO) doAddUserInfo(execer sqlx.ExecerContext, context_ context.Context, uid int64, nickname string, gender int8) (int64, error) {
         // INSERT INTO
         //   `%s#{str:TableUserInfo}` (`uid`, `nickname`, `gender`)
         // VALUES
@@ -258,7 +258,11 @@ pip install -U git+https://github.com/let-z-go/godao
         _query_substrs = append(_query_substrs, UserDAO_TableUserInfo)
         _args = append(_args, uid, nickname, gender)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
-        return execer.ExecContext(context_, _query, _args...)
+        _result, _e := execer.ExecContext(context_, _query, _args...)
+        if _e != nil {
+                return 0, _e
+        }
+        return _result.LastInsertId()
    }
 
    func (_self UserDAO) GetUserInfo(context_ context.Context, uid int64) (*UserInfo, error) {
@@ -342,7 +346,7 @@ pip install -U git+https://github.com/let-z-go/godao
                         _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                         _args = append(_args, args.Gender)
                 }
-                _raw_query = trimSuffix_ac826cbc7bff9df544940f053d2b178bc1aff49e(_raw_query, ",")
+                _raw_query = trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(_raw_query, ",")
         } else {
                 return 0, errors.New("invalid args")
         }
@@ -365,12 +369,12 @@ pip install -U git+https://github.com/let-z-go/godao
    }
 
    func (UserDAO) doAddMultiUserInfos(execer sqlx.ExecerContext, context_ context.Context, appID string, argsList []AddUserInfoArgs) (sql.Result, error) {
-        // INSERT INTO
-        //   `%s#{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
-        // VALUES
         // #if len(argsList) == 0
         // #  error errors.New("invalid argsList")
         // #endif
+        // INSERT INTO
+        //   `%s#{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
+        // VALUES
         // #for i := range argsList
         // #  if i >= 1
         //   ,
@@ -383,11 +387,11 @@ pip install -U git+https://github.com/let-z-go/godao
         _query_substrs := _buffer2[:0]
         _buffer3 := [3]interface{}{}
         _args := _buffer3[:0]
-        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n"...)
-        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         if len(argsList) == 0 {
                 return nil, errors.New("invalid argsList")
         }
+        _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n"...)
+        _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         for i := range argsList {
                 if i >= 1 {
                         _raw_query = append(_raw_query, "  ,\n"...)
@@ -500,12 +504,12 @@ pip install -U git+https://github.com/let-z-go/godao
    }
 
    func (UserDAO) doGetColumnsOfUserInfo(queryer sqlx.QueryerContext, context_ context.Context, appID string, uid int64, args *UserInfoColumns) (*UserInfo, error) {
+        // #if !(args.GetNickname || args.GetGender)
+        // #  error errors.New("invalid args")
+        // #endif
         // SELECT
         // #if false
         //   `uid#{out:UID}`,
-        // #endif
-        // #if args.GetNickname || args.GetGender
-        // #  error errors.New("invalid args")
         // #endif
         // #if args.GetNickname
         //   `nickname#{out:Nickname}`,
@@ -528,13 +532,13 @@ pip install -U git+https://github.com/let-z-go/godao
         _record := &_buffer4
         _buffer5 := [3]interface{}{}
         _results := _buffer5[:0]
+        if !(args.GetNickname || args.GetGender) {
+                return nil, errors.New("invalid args")
+        }
         _raw_query = append(_raw_query, "SELECT\n"...)
         if false {
                 _raw_query = append(_raw_query, "  `uid`,\n"...)
                 _results = append(_results, &_record.UID)
-        }
-        if args.GetNickname || args.GetGender {
-                return nil, errors.New("invalid args")
         }
         if args.GetNickname {
                 _raw_query = append(_raw_query, "  `nickname`,\n"...)
@@ -544,7 +548,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender`,\n"...)
                 _results = append(_results, &_record.Gender)
         }
-        _raw_query = trimSuffix_ac826cbc7bff9df544940f053d2b178bc1aff49e(_raw_query, ",")
+        _raw_query = trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(_raw_query, ",")
         _raw_query = append(_raw_query, "FROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
@@ -580,7 +584,7 @@ pip install -U git+https://github.com/let-z-go/godao
         GetGender   bool
    }
 
-   func trimSuffix_ac826cbc7bff9df544940f053d2b178bc1aff49e(rawQuery []byte, suffix string) []byte {
+   func trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 
