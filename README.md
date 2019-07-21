@@ -1,6 +1,6 @@
 # Godao
 
-DAO (Data Access Object) Generator for Go
+DAO (Data Access Object) Generation for Go
 
 ## Requirements
 
@@ -18,6 +18,9 @@ pip install -U git+https://github.com/let-z-go/godao
 
    ```yaml
    package_name: main
+
+   imports:
+       - errors
 
    $UserDAO:
      strings:
@@ -70,6 +73,9 @@ pip install -U git+https://github.com/let-z-go/godao
          UPDATE
            `%s{str:TableUserInfo}`
          SET
+         #if !(args.Nickname.Valid || args.Gender.Valid)
+         #  error errors.New("invalid args")
+         #endif
          #if args.Nickname.Valid
            `nickname` = ?{in:args.Nickname},
          #endif
@@ -93,6 +99,9 @@ pip install -U git+https://github.com/let-z-go/godao
          INSERT INTO
            `%s{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
          VALUES
+         #if len(argsList) == 0
+         #  error errors.New("invalid argsList")
+         #endif
          #for i := range argsList
            (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
          #endfor
@@ -142,6 +151,9 @@ pip install -U git+https://github.com/let-z-go/godao
          #if false
            `uid{out:UID}`,
          #endif
+         #if !(args.GetNickname || args.GetGender)
+         #  error errors.New("invalid args")
+         #endif
          #if args.GetNickname
            `nickname{out:Nickname}`,
          #endif
@@ -174,8 +186,8 @@ pip install -U git+https://github.com/let-z-go/godao
         "bytes"
         "context"
         "database/sql"
+        "errors"
         "fmt"
-
         "github.com/jmoiron/sqlx"
    )
 
@@ -297,6 +309,9 @@ pip install -U git+https://github.com/let-z-go/godao
         // UPDATE
         //   `%s{str:TableUserInfo}`
         // SET
+        // #if !(args.Nickname.Valid || args.Gender.Valid)
+        // #  error errors.New("invalid args")
+        // #endif
         // #if args.Nickname.Valid
         //   `nickname` = ?{in:args.Nickname},
         // #endif
@@ -314,6 +329,9 @@ pip install -U git+https://github.com/let-z-go/godao
         _args := _buffer3[:0]
         _raw_query = append(_raw_query, "UPDATE\n  `%s`\nSET\n"...)
         _query_substrs = append(_query_substrs, UserDAO_TableUserInfo)
+        if !(args.Nickname.Valid || args.Gender.Valid) {
+                return 0, errors.New("invalid args")
+        }
         if args.Nickname.Valid {
                 _raw_query = append(_raw_query, "  `nickname` = ?,\n"...)
                 _args = append(_args, args.Nickname)
@@ -322,7 +340,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                 _args = append(_args, args.Gender)
         }
-        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
+        _raw_query = trimSuffix_8063c300773dd1f18cce8538e53bfd349b207a96(_raw_query, ",")
         _raw_query = append(_raw_query, "WHERE\n  `uid` = ?\n"...)
         _args = append(_args, uid)
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
@@ -345,6 +363,9 @@ pip install -U git+https://github.com/let-z-go/godao
         // INSERT INTO
         //   `%s{str:TableUserInfoX(appID)}` (`uid`, `nickname`, `gender`)
         // VALUES
+        // #if len(argsList) == 0
+        // #  error errors.New("invalid argsList")
+        // #endif
         // #for i := range argsList
         //   (?{in:argsList[i].UID}, ?{in:argsList[i].Nickname}, ?{in:argsList[i].Gender}),
         // #endfor
@@ -357,11 +378,14 @@ pip install -U git+https://github.com/let-z-go/godao
         _args := _buffer3[:0]
         _raw_query = append(_raw_query, "INSERT INTO\n  `%s` (`uid`, `nickname`, `gender`)\nVALUES\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
+        if len(argsList) == 0 {
+                return nil, errors.New("invalid argsList")
+        }
         for i := range argsList {
                 _raw_query = append(_raw_query, "  (?, ?, ?),\n"...)
                 _args = append(_args, argsList[i].UID, argsList[i].Nickname, argsList[i].Gender)
         }
-        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
+        _raw_query = trimSuffix_8063c300773dd1f18cce8538e53bfd349b207a96(_raw_query, ",")
         _query := fmt.Sprintf(string(_raw_query), _query_substrs...)
         return execer.ExecContext(context_, _query, _args...)
    }
@@ -471,6 +495,9 @@ pip install -U git+https://github.com/let-z-go/godao
         // #if false
         //   `uid{out:UID}`,
         // #endif
+        // #if !(args.GetNickname || args.GetGender)
+        // #  error errors.New("invalid args")
+        // #endif
         // #if args.GetNickname
         //   `nickname{out:Nickname}`,
         // #endif
@@ -497,6 +524,9 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `uid`,\n"...)
                 _results = append(_results, &_record.UID)
         }
+        if !(args.GetNickname || args.GetGender) {
+                return nil, errors.New("invalid args")
+        }
         if args.GetNickname {
                 _raw_query = append(_raw_query, "  `nickname`,\n"...)
                 _results = append(_results, &_record.Nickname)
@@ -505,7 +535,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender`,\n"...)
                 _results = append(_results, &_record.Gender)
         }
-        _raw_query = trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(_raw_query, ",")
+        _raw_query = trimSuffix_8063c300773dd1f18cce8538e53bfd349b207a96(_raw_query, ",")
         _raw_query = append(_raw_query, "FROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
@@ -541,7 +571,7 @@ pip install -U git+https://github.com/let-z-go/godao
         GetGender   bool
    }
 
-   func trimSuffix_6a42690eab796a6992a04d9dc322b9f938d028ea(rawQuery []byte, suffix string) []byte {
+   func trimSuffix_8063c300773dd1f18cce8538e53bfd349b207a96(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 

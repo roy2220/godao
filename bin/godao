@@ -242,9 +242,16 @@ KIND_2_GO_TYPE = {
 class Config(object):
     @classmethod
     def load(cls, signature, path, raw):
-        must_be_dict(path, raw)
+        ensure_dict_type(path, raw)
         instance = cls(signature, path)
-        instance.package_name = must_be_str(path + ["package_name"], raw.get("package_name"))
+        instance.package_name = ensure_str_type(path + ["package_name"], raw.get("package_name"))
+        path.append("imports")
+        raw_imports = ensure_list_type(path, raw.get(path[-1], []))
+
+        for i, raw_import in enumerate(raw_imports):
+            instance.imports.append(ImportConfig.load(instance, path + [i], raw_import))
+
+        del path[-1]
 
         for k, v in raw.items():
             if isinstance(k, str) and k.startswith("$"):
@@ -257,9 +264,13 @@ class Config(object):
         self.signature = signature
         self.path = path
         self.package_name = None
+        self.imports = []
         self.daos = OrderedDict()
 
     def resolve(self, context):
+        for import_ in self.imports:
+            import_.resolve(context)
+
         for dao in self.daos.values():
             dao.resolve(context)
 
@@ -292,17 +303,15 @@ ${func_code}
  */
 
 package ${root.package_name}
-% if len(context_.import_paths1) + len(context_.import_paths2) >= 1:
+% if len(context_.imports) >= 1:
 
 import (
-% for import_path in sorted(context_.import_paths1):
-    "${import_path}"
-% endfor
-% if len(context_.import_paths1) * len(context_.import_paths2) >= 1:
-
-% endif
-% for import_path in sorted(context_.import_paths2):
-    "${import_path}"
+% for package_name, package_path_literal in sorted(context_.imports, key=lambda x: x[1]):
+%     if package_name is None:
+    ${package_path_literal}
+%     else:
+    ${package_name} ${package_path_literal}
+%     endif
 % endfor
 )
 % endif
@@ -314,14 +323,41 @@ import (
         return code
 
 
+class ImportConfig(object):
+    @classmethod
+    def load(cls, parent, path, raw):
+        ensure_type(path, raw, str, list)
+        instance = cls(parent, path)
+
+        if isinstance(raw, str):
+            instance.package_path = raw
+        else:
+            if len(raw) != 2:
+                error(path, "must be of length 2")
+
+            instance.package_name = check_name(path + [0], raw[0])
+            instance.package_path = ensure_str_type(path + [1], raw[1])
+
+        return instance
+
+    def __init__(self, parent, path):
+        self.parent = parent
+        self.path = path
+        self.package_name = None
+        self.package_path = None
+
+    def resolve(self, context):
+        context.add_import(self.package_name, self.package_path)
+
+
 class DAOConfig(object):
     @classmethod
     def load(cls, parent, path, name, raw):
         check_name(path, name)
-        must_be_dict(path, raw)
+        ensure_dict_type(path, raw)
         instance = cls(parent, path, name)
         path.append("strings")
-        raw_strings = must_be_dict(path, raw.get(path[-1], {}))
+        raw_strings = ensure_dict_type(path, raw.get(path[-1], OrderedDict()))
 
         for k, v in raw_strings.items():
             if isinstance(k, str) and k.startswith("$"):
@@ -405,9 +441,9 @@ func Make${dao.name}(db *sqlx.DB) ${dao.name} {
             make_string_constant_name=make_string_constant_name,
         )]
 
-        context.import_paths1.add("context")
-        context.import_paths1.add("database/sql")
-        context.import_paths2.add("github.com/jmoiron/sqlx")
+        context.add_import(None, "context")
+        context.add_import(None, "database/sql")
+        context.add_import(None, "github.com/jmoiron/sqlx")
 
         for method in self.methods.values():
             code.extend(method.emit_code(context))
@@ -419,7 +455,7 @@ class StringConfig(object):
     @classmethod
     def load(cls, parent, path, name, raw):
         check_name(path, name)
-        must_be_dict(path, raw)
+        ensure_dict_type(path, raw)
         instance = cls(parent, path, name)
         value = raw.get("value")
         maker_func_name = raw.get("maker_func_name")
@@ -428,7 +464,7 @@ class StringConfig(object):
             error(path, "either `value` or `maker_func_name` required")
 
         if value is not None:
-            instance.value = must_be_str(path + ["value"], value)
+            instance.value = ensure_str_type(path + ["value"], value)
 
         if maker_func_name is not None:
             instance.maker_func_name = check_name(path + ["maker_func_name"], maker_func_name)
@@ -450,7 +486,7 @@ class MethodConfig(object):
     @classmethod
     def load(cls, parent, path, name, raw):
         check_name(path, name)
-        must_be_dict(path, raw)
+        ensure_dict_type(path, raw)
         instance = cls(parent, path, name)
         instance.input = InputConfig.load(instance, path + ["input"], raw.get("input"))
         instance.output = OutputConfig.load(instance, path + ["output"], raw.get("output"))
@@ -613,7 +649,7 @@ class MethodConfig(object):
                     self._output_line("_query := string(_raw_query)")
                 else:
                     self._output_line("_query := fmt.Sprintf(string(_raw_query), _query_substrs...)")
-                    context.import_paths1.add("fmt")
+                    context.add_import(None, "fmt")
 
                     if method.sql.has_array_query_args:
                         self._output_lines(Template("""\
@@ -725,6 +761,9 @@ return _record, nil
                 self._output_line("}")
                 return False
 
+            def visit_error_statement(self, statement):
+                self._output_line("return {}, {}".format(result_zero, statement.expr))
+
             def visit_block_statement(self, statement):
                 self._line_prefix += self._indent
 
@@ -767,7 +806,7 @@ Loop:
 }
 """)
 
-                context.import_paths1.add("bytes")
+                context.add_import(None, "bytes")
                 self._output_line("_raw_query = {}(_raw_query, {})".format(func_name, statement.suffix_literal))
 
             def visit_text_statement(self, statement):
@@ -889,11 +928,11 @@ ${impl_code}
             impl_code=code_generator.get_output(),
         )]
 
-        context.import_paths1.add("context")
-        context.import_paths2.add("github.com/jmoiron/sqlx")
+        context.add_import(None, "context")
+        context.add_import(None, "github.com/jmoiron/sqlx")
 
         if reduced_result_go_type is None:
-            context.import_paths1.add("database/sql")
+            context.add_import(None, "database/sql")
 
         return code
 
@@ -904,7 +943,7 @@ class InputConfig(object):
         instance = cls(parent, path)
 
         if raw is not None:
-            must_be_dict(path, raw)
+            ensure_dict_type(path, raw)
 
             for k, v in raw.items():
                 if isinstance(k, str) and k.startswith("$"):
@@ -912,7 +951,7 @@ class InputConfig(object):
 
                     if isinstance(v, OrderedDict):
                         struct_type_name, struct_type_def = parse_struct_type_config(path + [k], v)
-                        is_array = must_be_bool(path + [k, "is_array"], v.get("is_array", False))
+                        is_array = ensure_bool_type(path + [k, "is_array"], v.get("is_array", False))
                         instance.params[param_name] = struct_type_name, struct_type_def, is_array
                     else:
                         instance.params[param_name] = parse_type(path + [k], v)
@@ -1003,7 +1042,7 @@ class OutputConfig(object):
         instance = cls(parent, path)
 
         if raw is not None:
-            must_be_dict(path, raw)
+            ensure_dict_type(path, raw)
 
             for k, v in raw.items():
                 if isinstance(k, str) and k.startswith("$"):
@@ -1013,11 +1052,11 @@ class OutputConfig(object):
             if "struct_type_name" in raw:
                 instance.struct_type_name = check_name(path + ["struct_type_name"], raw["struct_type_name"])
 
-            instance.is_array = must_be_bool(path + ["is_array"], raw.get("is_array", False))
-            instance.ignore_no_rows = must_be_bool(path + ["ignore_no_rows"], raw.get("ignore_no_rows", False))
+            instance.is_array = ensure_bool_type(path + ["is_array"], raw.get("is_array", False))
+            instance.ignore_no_rows = ensure_bool_type(path + ["ignore_no_rows"], raw.get("ignore_no_rows", False))
 
             if "as_result" in raw:
-                instance.as_result = must_be(path + ["as_result"], raw["as_result"], "last_insert_id", "rows_affected")
+                instance.as_result = ensure_value(path + ["as_result"], raw["as_result"], "last_insert_id", "rows_affected")
 
         return instance
 
@@ -1063,7 +1102,7 @@ class OutputConfig(object):
 class SQLConfig(object):
     @classmethod
     def load(cls, parent, path, raw):
-        raw = must_be_str(path, raw).rstrip()
+        raw = ensure_str_type(path, raw).rstrip()
         instance = cls(parent, path, raw)
         instance.program = Preprocessor(path, raw).get_program()
         embedded_code = []
@@ -1181,6 +1220,11 @@ class Preprocessor(object):
             if match is not None:
                 return self._get_for_statement()
 
+            match = re.match(r"#\s*error", line)
+
+            if match is not None:
+                return self._get_error_statement()
+
             match = re.match(r"#\s*trim-suffix", line)
 
             if match is not None:
@@ -1258,6 +1302,17 @@ class Preprocessor(object):
 
         return statement
 
+    def _get_error_statement(self):
+        statement = ErrorStatement()
+        line = self._read_line()
+        match = re.match(r"#\s*error\s+([^\s].*?)\s*$", line)
+
+        if match is None:
+            self._abort("#error ... directive expected")
+
+        statement.expr = match.group(1)
+        return statement
+
     def _get_block_statement(self, stop_line_pattern):
         statement = BlockStatement()
 
@@ -1277,7 +1332,7 @@ class Preprocessor(object):
         if match is None:
             self._abort("#trim-suffix ... directive expected")
 
-        statement.suffix_literal = json.dumps(match.group(1))
+        statement.suffix_literal = quote_string(match.group(1))
         return statement
 
     def _get_text_statement(self):
@@ -1360,7 +1415,7 @@ class Preprocessor(object):
 
             self._skip_line()
 
-        statement.lines_literal = json.dumps("\n".join(lines) + "\n")
+        statement.lines_literal = quote_string("\n".join(lines) + "\n")
         statement.lines_size = lines_size + len(lines)
         return statement
 
@@ -1420,6 +1475,14 @@ class ForStatement(object):
             self.body.accept_visit(visitor)
 
 
+class ErrorStatement(object):
+    def __init__(self):
+        self.expr = None
+
+    def accept_visit(self, visitor):
+        visitor.visit_error_statement(self)
+
+
 class BlockStatement(object):
     def __init__(self):
         self.body = []
@@ -1460,6 +1523,9 @@ class Visitor(object):
     def visit_for_statement(self, statement):
         return True
 
+    def visit_error_statement(self, statement):
+        return True
+
     def visit_block_statement(self, statement):
         return True
 
@@ -1472,14 +1538,16 @@ class Visitor(object):
 
 class Context(object):
     def __init__(self, config_signature):
-        self.import_paths1 = set()
-        self.import_paths2 = set()
+        self.imports = set()
         self.struct_type_defs = OrderedDict()
         self.func_codes = []
         self._config_signature = config_signature
         self._struct_kinds_and_type_digests = {}
         self._customized_kind_2_go_type = {}
         self._func_id_2_name = {}
+
+    def add_import(self, package_name, package_path):
+        self.imports.add((package_name, quote_string(package_path)))
 
     def define_struct_type(self, path, struct_type_name, struct_type_def):
         struct_type_digest = "struct { "
@@ -1515,9 +1583,9 @@ class Context(object):
             return self._customized_kind_2_go_type[kind]
         else:
             {
-                KIND_TIME: lambda: self.import_paths1.add("time"),
-                KIND_NULL_TIME: lambda: self.import_paths2.add("github.com/go-sql-driver/mysql"),
-                KIND_TIME_ARRAY: lambda: self.import_paths1.add("time"),
+                KIND_TIME: lambda: self.add_import(None, "time"),
+                KIND_NULL_TIME: lambda: self.add_import(None, "github.com/go-sql-driver/mysql"),
+                KIND_TIME_ARRAY: lambda: self.add_import(None, "time"),
             }.get(kind, lambda: None)()
 
             return KIND_2_GO_TYPE[kind]
@@ -1540,7 +1608,7 @@ class InvalidConfigError(Exception):
         self._message = message
 
     def __str__(self):
-        return "{}: {}".format(".".join(self._path), self._message)
+        return "{}: {}".format(self._path, self._message)
 
 
 def load_config(config_text):
@@ -1555,50 +1623,52 @@ def load_config(config_text):
     return Config.load(sha1.hexdigest(), [""], raw_config)
 
 
-def must_be_bool(path, value):
-    if not isinstance(value, bool):
-        error(path, "must be bool, type={!r}".format(type(value)))
-
-    return value
+def ensure_bool_type(path, value):
+    return ensure_type(path, value, bool)
 
 
-def must_be_str(path, value):
-    if not isinstance(value, str):
-        error(path, "must be str, type={!r}".format(type(value)))
-
-    return value
+def ensure_str_type(path, value):
+    return ensure_type(path, value, str)
 
 
-def must_be_list(path, value):
-    if not isinstance(value, list):
-        error(path, "must be list, type={!r}".format(type(value)))
-
-    return value
+def ensure_list_type(path, value):
+    return ensure_type(path, value, list)
 
 
-def must_be_dict(path, value):
-    if not isinstance(value, OrderedDict):
-        error(path, "must be dict, type={!r}".format(type(value)))
-
-    return value
+def ensure_dict_type(path, value):
+    return ensure_type(path, value, OrderedDict)
 
 
-def must_be(path, value, *valid_values):
-    for valid_value in valid_values:
-        if valid_value == value:
+def ensure_type(path, value, *types):
+    for type_ in types:
+        if isinstance(value, type_):
             return value
 
-    message = "must be {!r}".format(valid_values[0])
+    message = "must be type {!r}".format(types[0].__name__)
 
-    for valid_value in valid_values[1:]:
-        message += " or {!r}".format(valid_value)
+    for type_ in types[1:]:
+        message += " or {!r}".format(type_.__name__)
+
+    message += ", type={!r}".format(type(value).__name__)
+    error(path, message)
+
+
+def ensure_value(path, value, *values):
+    for value2 in values:
+        if value2 == value:
+            return value
+
+    message = "must be value {!r}".format(values[0])
+
+    for value2 in values[1:]:
+        message += " or {!r}".format(value2)
 
     message += ", value={!r}".format(value)
     error(path, message)
 
 
 def check_name(path, name):
-    must_be_str(path, name)
+    ensure_str_type(path, name)
 
     if CRE_NAME.match(name) is None:
         error(path, "invalid name, value={!r}".format(name))
@@ -1607,7 +1677,7 @@ def check_name(path, name):
 
 
 def parse_type(path, type_):
-    must_be_str(path, type_)
+    ensure_str_type(path, type_)
     kind = TYPE_2_KIND.get(type_)
 
     if kind is None:
@@ -1672,6 +1742,10 @@ def make_string_constant_name(dao_name, string_name):
     return "{}_{}".format(dao_name, string_name)
 
 
+def quote_string(string):
+    return json.dumps(string)
+
+
 def generate_code(config_text):
     config = load_config(config_text)
     context = Context(config.signature)
@@ -1695,11 +1769,27 @@ def format_code(code):
 
 
 def error(path, message):
-    raise InvalidConfigError(path, message)
+    raise InvalidConfigError(dump_path(path), message)
 
 
 def warn(path, message):
-    sys.stderr.write("godao: WARNING: {}: {}\n".format(".".join(path), message))
+    sys.stderr.write("godao: WARNING: {}: {}\n".format(dump_path(path), message))
+
+
+def dump_path(path):
+    path = path[:]
+    i = 0
+
+    for j in range(len(path)):
+        x = path[j]
+
+        if isinstance(x, int):
+            path[i-1] += "[{}]".format(x)
+        else:
+            path[i] = x
+            i += 1
+
+    return ".".join(path[:i])
 
 
 def main():
