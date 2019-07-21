@@ -41,6 +41,7 @@ CRE_NAME = re.compile(r"{}$".format(RE_ID))
 CRE_STR_ANNOT = re.compile(r"""
 %s
 (
+    #
     \{{
         str
         \:
@@ -63,6 +64,7 @@ CRE_STR_ANNOT = re.compile(r"""
 CRE_IN_ANNOT = re.compile(r"""
 \?
 (
+    #
     \{{
     in
     \:
@@ -76,6 +78,7 @@ CRE_IN_ANNOT = re.compile(r"""
 CRE_OUT_ANNOT = re.compile(r"""
 ({id})
 (
+    #
     \{{
     out
     \:
@@ -1379,28 +1382,20 @@ class Preprocessor(object):
                 statement.out_annots.append((column_name, result_name))
                 line = line[:match.start(2)] + line[match.end(2):]
 
-            for c in ("{", "}"):
-                i = 0
+            i = 0
 
-                while True:
-                    i = line.find(c, i)
+            while True:
+                i = line.find("#", i)
 
-                    if i < 0:
-                        break
+                if i < 0:
+                    break
 
-                    j = i + 1
+                if i == len(line) - 1 or line[i + 1] != "#":
+                    self._abort("bad annotation: value=...{!r}".format(line[i:]))
 
-                    while j < len(line):
-                        if line[j] != c:
-                            break
+                i += 2
 
-                        j += 1
-
-                    i += (j - i) // 2 * 2
-
-                    if i != j:
-                        self._abort("bad annots: value=...{!r}".format(line[i:]))
-
+            line = line.replace("##", "#")
             lines.append(line)
 
             if PY3:
