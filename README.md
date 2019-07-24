@@ -28,7 +28,7 @@ pip install -U git+https://github.com/let-z-go/godao
          value: user_info
 
        $TableUserInfoX:
-         maker_func_name: LocateUserInfoTable
+         maker_func: LocateUserInfoTable
 
      $AddUserInfo:
        input:
@@ -47,9 +47,9 @@ pip install -U git+https://github.com/let-z-go/godao
        input:
          $uid: int64
        output: &user_info_struct
-         $UID: int64
-         $Nickname: string
-         $Gender: int8
+         $UID: [int64, json:"uid"]
+         $Nickname: [string, json:"nickname"]
+         $Gender: [int8, json:"gender"]
          struct_type_name: UserInfo
          ignore_no_rows: true
        sql: |
@@ -346,7 +346,7 @@ pip install -U git+https://github.com/let-z-go/godao
                         _raw_query = append(_raw_query, "  `gender` = ?,\n"...)
                         _args = append(_args, args.Gender)
                 }
-                _raw_query = trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(_raw_query, ",")
+                _raw_query = trimSuffix_6ee245303538dc28db02694626b22a3d5f802cec(_raw_query, ",")
         } else {
                 return 0, errors.New("invalid args")
         }
@@ -548,7 +548,7 @@ pip install -U git+https://github.com/let-z-go/godao
                 _raw_query = append(_raw_query, "  `gender`,\n"...)
                 _results = append(_results, &_record.Gender)
         }
-        _raw_query = trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(_raw_query, ",")
+        _raw_query = trimSuffix_6ee245303538dc28db02694626b22a3d5f802cec(_raw_query, ",")
         _raw_query = append(_raw_query, "FROM\n  `%s`\nWHERE\n  `uid` = ?\n"...)
         _query_substrs = append(_query_substrs, LocateUserInfoTable(context_, appID))
         _args = append(_args, uid)
@@ -563,9 +563,9 @@ pip install -U git+https://github.com/let-z-go/godao
    }
 
    type UserInfo struct {
-        UID      int64
-        Nickname string
-        Gender   int8
+        UID      int64  `json:"uid"`
+        Nickname string `json:"nickname"`
+        Gender   int8   `json:"gender"`
    }
 
    type SetUserInfoArgs struct {
@@ -584,7 +584,7 @@ pip install -U git+https://github.com/let-z-go/godao
         GetGender   bool
    }
 
-   func trimSuffix_8d49903300a58635daf38603f2ecdebb16cdca2c(rawQuery []byte, suffix string) []byte {
+   func trimSuffix_6ee245303538dc28db02694626b22a3d5f802cec(rawQuery []byte, suffix string) []byte {
         n := len(rawQuery)
         i := n
 

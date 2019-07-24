@@ -287,8 +287,8 @@ class Config(object):
 % for struct_type_name, struct_type_def in context_.struct_type_defs.items():
 
 type ${struct_type_name} struct {
-%     for field_name, field_kind in struct_type_def.items():
-    ${field_name} ${context_.kind_to_go_type(field_kind)}
+%     for field_name, (field_kind, filed_tag) in struct_type_def.items():
+    ${field_name} ${context_.kind_to_go_type(field_kind)}${"" if filed_tag is None else " `{}`".format(filed_tag)}
 %     endfor
 }
 % endfor
@@ -461,16 +461,16 @@ class StringConfig(object):
         ensure_dict_type(path, raw)
         instance = cls(parent, path, name)
         value = raw.get("value")
-        maker_func_name = raw.get("maker_func_name")
+        maker_func = raw.get("maker_func")
 
-        if value is None and maker_func_name is None:
-            error(path, "either `value` or `maker_func_name` required")
+        if value is None and maker_func is None:
+            error(path, "either `value` or `maker_func` required")
 
         if value is not None:
             instance.value = ensure_str_type(path + ["value"], value)
 
-        if maker_func_name is not None:
-            instance.maker_func_name = check_name(path + ["maker_func_name"], maker_func_name)
+        if maker_func is not None:
+            instance.maker_func = ensure_str_type(path + ["maker_func"], maker_func)
 
         return instance
 
@@ -479,7 +479,7 @@ class StringConfig(object):
         self.path = path
         self.name = name
         self.value = None
-        self.maker_func_name = None
+        self.maker_func = None
 
     def resolve(self, context):
         pass
@@ -823,7 +823,7 @@ Loop:
                             query_substr = make_string_constant_name(dao.name, string_name)
                         else:
                             string = dao.strings[string_name]
-                            query_substr = string.maker_func_name + "(context_"
+                            query_substr = string.maker_func + "(context_"
 
                             if string.value is not None:
                                 query_substr += ", " + make_string_constant_name(dao.name, string_name)
@@ -956,7 +956,7 @@ class InputConfig(object):
                     if isinstance(v, str):
                         instance.params[param_name] = parse_type(path + [k], v)
                     else:
-                        struct_type_name, struct_type_def = parse_struct_type_config(path + [k], v)
+                        struct_type_name, struct_type_def = parse_struct_type_config(path + [k], v, True)
                         is_array = ensure_bool_type(path + [k, "is_array"], v.get("is_array", False))
                         instance.params[param_name] = struct_type_name, struct_type_def, is_array
 
@@ -1015,7 +1015,7 @@ class InputConfig(object):
                     param_kind = context.define_struct_array_type(param_kind, struct_type_name)
                     self.params[param_name] = param_kind
 
-                    for field_name, field_kind in struct_type_def.items():
+                    for field_name, (field_kind, _) in struct_type_def.items():
                         cre_sub_param_name = re.compile(r"{}\[.+\]\.{}$".format(param_name, field_name))
                         n = 0
 
@@ -1030,7 +1030,7 @@ class InputConfig(object):
                 else:
                     self.params[param_name] = param_kind
 
-                    for field_name, field_kind in struct_type_def.items():
+                    for field_name, (field_kind, _) in struct_type_def.items():
                         sub_param_name = param_name + "." + field_name
 
                         if sub_param_name in used_param_names:
@@ -1045,17 +1045,11 @@ class OutputConfig(object):
     def load(cls, parent, path, raw):
         instance = cls(parent, path)
 
-        if raw is not None:
+        if raw is None:
+            instance.results = {}
+        else:
             ensure_dict_type(path, raw)
-
-            for k, v in raw.items():
-                if isinstance(k, str) and k.startswith("$"):
-                    result_name = check_name(path + [k], k[1:])
-                    instance.results[result_name] = parse_type(path + [k], v)
-
-            if "struct_type_name" in raw:
-                instance.struct_type_name = check_name(path + ["struct_type_name"], raw["struct_type_name"])
-
+            instance.struct_type_name, instance.results = parse_struct_type_config(path, raw, False)
             instance.is_array = ensure_bool_type(path + ["is_array"], raw.get("is_array", False))
             instance.ignore_no_rows = ensure_bool_type(path + ["ignore_no_rows"], raw.get("ignore_no_rows", False))
 
@@ -1067,7 +1061,7 @@ class OutputConfig(object):
     def __init__(self, parent, path):
         self.parent = parent
         self.path = path
-        self.results = OrderedDict()
+        self.results = None
         self.struct_type_name = None
         self.is_array = None
         self.ignore_no_rows = None
@@ -1085,7 +1079,7 @@ class OutputConfig(object):
         for result_name in set(self.results.keys()) - used_result_names:
             warn(self.path, "result {!r} unused".format(result_name))
 
-        for result_name, result_kind in self.results.items():
+        for result_name, (result_kind, _) in self.results.items():
             if kind_is_array(result_kind):
                 error(self.path, "result {!r} should not be array".format(result_name))
 
@@ -1098,7 +1092,7 @@ class OutputConfig(object):
 
         if len(self.results) >= 1:
             if self.struct_type_name is None:
-                (_, self.reduced_result_kind), = self.results.items()
+                (_, (self.reduced_result_kind, _)), = self.results.items()
             else:
                 self.reduced_result_kind = context.define_struct_type(self.path, self.struct_type_name, self.results)
 
@@ -1158,10 +1152,10 @@ class SQLConfig(object):
                 error(self.path, "string {!r} undefined".format(string_name))
 
             if param_names is None:
-                if string.maker_func_name is not None:
+                if string.maker_func is not None:
                     error(self.path, "str:{} => must call with argument list (...)".format(string_name))
             else:
-                if string.maker_func_name is None:
+                if string.maker_func is None:
                     error(self.path, "str:{} => can not call with argument list ({})".format(string_name, ",".join(param_names)))
 
                 for param_name in param_names:
@@ -1585,9 +1579,13 @@ class Context(object):
     def define_struct_type(self, path, struct_type_name, struct_type_def):
         struct_type_digest = "struct { "
 
-        for field_name, field_kind in struct_type_def.items():
-            field_type = KIND_2_TYPE[field_kind]
-            struct_type_digest += "{} {}; ".format(field_type, field_name)
+        for field_name, (field_kind, filed_tag) in struct_type_def.items():
+            field_go_type = KIND_2_GO_TYPE[field_kind]
+
+            if filed_tag is None:
+                struct_type_digest += "{} {}; ".format(field_name, field_go_type)
+            else:
+                struct_type_digest += "{} {} `{}`; ".format(field_name, field_go_type, filed_tag)
 
         struct_type_digest += "}"
         struct_kind_and_type_digest = self._struct_kinds_and_type_digests.get(struct_type_name)
@@ -1722,14 +1720,33 @@ def parse_type(path, type_):
     return kind
 
 
-def parse_struct_type_config(path, struct_type_config):
-    struct_type_name = check_name(path + ["struct_type_name"], struct_type_config.get("struct_type_name"))
+def parse_struct_type_config(path, struct_type_config, require_struct_type_name):
+    if require_struct_type_name:
+        struct_type_name = check_name(path + ["struct_type_name"], struct_type_config.get("struct_type_name"))
+    else:
+        struct_type_name = struct_type_config.get("struct_type_name")
+
+        if struct_type_name is not None:
+            check_name(path + ["struct_type_name"], struct_type_name)
+
     struct_type_def = OrderedDict()
 
     for k, v in struct_type_config.items():
         if isinstance(k, str) and k.startswith("$"):
+            ensure_type(path + [k], v, str, list)
             field_name = check_name(path + [k], k[1:])
-            struct_type_def[field_name] = parse_type(path + [k], v)
+
+            if isinstance(v, str):
+                field_kind = parse_type(path + [k], v)
+                filed_tag = None
+            else:
+                if len(v) != 2:
+                    error(path + [k], "must be of length 2")
+
+                field_kind = parse_type(path + [k] + [0], v[0])
+                filed_tag = ensure_str_type(path + [k] + [1], v[1])
+
+            struct_type_def[field_name] = field_kind, filed_tag
 
     return struct_type_name, struct_type_def
 
